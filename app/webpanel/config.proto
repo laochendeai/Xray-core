@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package xray.app.webpanel;
+option csharp_namespace = "Xray.App.Webpanel";
+option go_package = "github.com/xtls/xray-core/app/webpanel";
+option java_package = "com.xray.app.webpanel";
+option java_multiple_files = true;
+
+message Config {
+  string listen = 1;
+  string api_endpoint = 2;
+  string username = 3;
+  string password = 4;
+  string jwt_secret = 5;
+  string config_path = 6;
+  string cert_file = 7;
+  string key_file = 8;
+}
