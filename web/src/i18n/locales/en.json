@@ -45,7 +45,9 @@
     "dns": "DNS",
     "monitor": "Monitor",
     "settings": "Settings",
-    "config": "Config"
+    "config": "Config",
+    "subscriptions": "Subscriptions",
+    "nodePool": "Node Pool"
   },
   "dashboard": {
     "systemInfo": "System Info",
@@ -156,5 +158,44 @@
     "restoreBackup": "Restore Backup",
     "exportConfig": "Export Config",
     "importConfig": "Import Config"
+  },
+  "subscriptions": {
+    "title": "Subscription Management",
+    "url": "Subscription URL",
+    "remark": "Remark",
+    "autoRefresh": "Auto Refresh",
+    "refreshInterval": "Refresh Interval (min)",
+    "lastRefresh": "Last Refresh",
+    "nodeCount": "Nodes",
+    "addSubscription": "Add Subscription",
+    "deleteConfirm": "Are you sure to delete this subscription and all its nodes?",
+    "refreshNow": "Refresh Now",
+    "never": "Never"
+  },
+  "nodePool": {
+    "title": "Node Pool",
+    "staging": "Staging",
+    "active": "Active",
+    "demoted": "Demoted",
+    "protocol": "Protocol",
+    "address": "Address",
+    "avgDelay": "Avg Delay",
+    "failRate": "Fail Rate",
+    "totalPings": "Total Pings",
+    "consecutiveFails": "Consecutive Fails",
+    "promote": "Promote",
+    "demote": "Demote",
+    "promoteConfirm": "Promote this node to active?",
+    "demoteConfirm": "Demote this node?",
+    "deleteConfirm": "Are you sure to delete this node?",
+    "validationConfig": "Validation Config",
+    "minSamples": "Min Samples",
+    "maxFailRate": "Max Fail Rate",
+    "maxAvgDelay": "Max Avg Delay (ms)",
+    "probeInterval": "Probe Interval (sec)",
+    "probeUrl": "Probe URL",
+    "demoteAfterFails": "Demote After Fails",
+    "autoRemoveDemoted": "Auto Remove Demoted",
+    "saveConfig": "Save Config"
   }
 }

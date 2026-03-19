@@ -24,6 +24,7 @@ type WebPanel struct {
 	grpcClient *GRPCClient
 	auth       *AuthManager
 	instance   *core.Instance
+	subManager *SubscriptionManager
 }
 
 // NewWebPanel creates a new WebPanel instance from config.
@@ -83,6 +84,11 @@ func (wp *WebPanel) Start() error {
 	// Initialize auth manager
 	wp.auth = NewAuthManager(username, password, jwtSecret)
 
+	// Initialize subscription manager if configPath is available
+	if wp.config.ConfigPath != "" {
+		wp.subManager = NewSubscriptionManager(wp.config.ConfigPath, wp.grpcClient, wp.instance)
+	}
+
 	// Build HTTP mux
 	mux := http.NewServeMux()
 	wp.registerRoutes(mux)
@@ -119,6 +125,13 @@ func (wp *WebPanel) Start() error {
 		}
 	}()
 
+	// Start subscription manager
+	if wp.subManager != nil {
+		if err := wp.subManager.Start(); err != nil {
+			errors.LogWarning(context.Background(), "failed to start subscription manager: ", err.Error())
+		}
+	}
+
 	return nil
 }
 
@@ -126,6 +139,10 @@ func (wp *WebPanel) Close() error {
 	wp.Lock()
 	defer wp.Unlock()
 
+	if wp.subManager != nil {
+		wp.subManager.Stop()
+		wp.subManager = nil
+	}
 	if wp.server != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -180,6 +197,12 @@ func (wp *WebPanel) registerRoutes(mux *http.ServeMux) {
 
 	// Share link
 	mux.HandleFunc("/api/v1/share/generate", wp.authMiddleware(wp.handleShareGenerate))
+
+	// Subscriptions & Node Pool
+	mux.HandleFunc("/api/v1/subscriptions", wp.authMiddleware(wp.handleSubscriptions))
+	mux.HandleFunc("/api/v1/subscriptions/", wp.authMiddleware(wp.handleSubscriptionByID))
+	mux.HandleFunc("/api/v1/node-pool", wp.authMiddleware(wp.handleNodePool))
+	mux.HandleFunc("/api/v1/node-pool/", wp.authMiddleware(wp.handleNodePoolByID))
 
 	// Subscription (public endpoint)
 	mux.HandleFunc("/sub/", wp.handleSubscription)

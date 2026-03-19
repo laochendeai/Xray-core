@@ -92,4 +92,22 @@ export const shareAPI = {
   generate: (params: any) => apiClient.post('/share/generate', params) as Promise<any>
 }
 
+export const subscriptionAPI = {
+  list: () => apiClient.get('/subscriptions') as Promise<any>,
+  add: (data: { url: string; remark: string; autoRefresh: boolean; refreshIntervalMin: number }) =>
+    apiClient.post('/subscriptions', data) as Promise<any>,
+  delete: (id: string) => apiClient.delete(`/subscriptions/${id}`) as Promise<any>,
+  refresh: (id: string) => apiClient.post(`/subscriptions/${id}/refresh`) as Promise<any>
+}
+
+export const nodePoolAPI = {
+  list: (status?: string) =>
+    apiClient.get('/node-pool', { params: status ? { status } : {} }) as Promise<any>,
+  promote: (id: string) => apiClient.post(`/node-pool/${id}/promote`) as Promise<any>,
+  demote: (id: string) => apiClient.post(`/node-pool/${id}/demote`) as Promise<any>,
+  delete: (id: string) => apiClient.delete(`/node-pool/${id}`) as Promise<any>,
+  getConfig: () => apiClient.get('/node-pool/config') as Promise<any>,
+  updateConfig: (config: any) => apiClient.put('/node-pool/config', config) as Promise<any>
+}
+
 export default apiClient

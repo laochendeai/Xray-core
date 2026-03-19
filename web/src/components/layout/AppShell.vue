@@ -81,6 +81,8 @@ const menuOptions = computed<MenuOption[]>(() => [
   { label: t('nav.inbounds'), key: 'inbounds' },
   { label: t('nav.outbounds'), key: 'outbounds' },
   { label: t('nav.users'), key: 'users' },
+  { label: t('nav.subscriptions'), key: 'subscriptions' },
+  { label: t('nav.nodePool'), key: 'node-pool' },
   { label: t('nav.routing'), key: 'routing' },
   { label: t('nav.dns'), key: 'dns' },
   { label: t('nav.monitor'), key: 'monitor' },

@@ -45,7 +45,9 @@
     "dns": "DNS 配置",
     "monitor": "实时监控",
     "settings": "系统设置",
-    "config": "配置管理"
+    "config": "配置管理",
+    "subscriptions": "订阅管理",
+    "nodePool": "节点池"
   },
   "dashboard": {
     "systemInfo": "系统信息",
@@ -156,5 +158,44 @@
     "restoreBackup": "恢复备份",
     "exportConfig": "导出配置",
     "importConfig": "导入配置"
+  },
+  "subscriptions": {
+    "title": "订阅管理",
+    "url": "订阅 URL",
+    "remark": "备注",
+    "autoRefresh": "自动刷新",
+    "refreshInterval": "刷新间隔(分钟)",
+    "lastRefresh": "上次刷新",
+    "nodeCount": "节点数",
+    "addSubscription": "添加订阅",
+    "deleteConfirm": "确定要删除此订阅及其所有节点吗？",
+    "refreshNow": "立即刷新",
+    "never": "从未"
+  },
+  "nodePool": {
+    "title": "节点池",
+    "staging": "验证中",
+    "active": "已激活",
+    "demoted": "已降级",
+    "protocol": "协议",
+    "address": "地址",
+    "avgDelay": "平均延迟",
+    "failRate": "失败率",
+    "totalPings": "探测次数",
+    "consecutiveFails": "连续失败",
+    "promote": "晋升",
+    "demote": "降级",
+    "promoteConfirm": "确定要手动晋升此节点吗？",
+    "demoteConfirm": "确定要降级此节点吗？",
+    "deleteConfirm": "确定要删除此节点吗？",
+    "validationConfig": "验证配置",
+    "minSamples": "最少探测次数",
+    "maxFailRate": "最大失败率",
+    "maxAvgDelay": "最大平均延迟(ms)",
+    "probeInterval": "探测间隔(秒)",
+    "probeUrl": "探测 URL",
+    "demoteAfterFails": "连续失败降级阈值",
+    "autoRemoveDemoted": "自动删除已降级节点",
+    "saveConfig": "保存配置"
   }
 }
