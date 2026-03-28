@@ -142,8 +142,12 @@ func (wp *WebPanel) handleNodePool(w http.ResponseWriter, r *http.Request) {
 
 	status := r.URL.Query().Get("status")
 	nodes := wp.subManager.ListNodes(status)
+	summary := wp.subManager.GetPoolSummary()
+	recentEvents := wp.subManager.ListRecentNodeEvents(10)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"nodes": nodes,
+		"nodes":        nodes,
+		"summary":      summary,
+		"recentEvents": recentEvents,
 	})
 }
 
@@ -154,6 +158,11 @@ func (wp *WebPanel) handleNodePoolByID(w http.ResponseWriter, r *http.Request) {
 	// Handle /api/v1/node-pool/config
 	if strings.HasPrefix(path, "config") {
 		wp.handleNodePoolConfig(w, r)
+		return
+	}
+
+	if strings.HasPrefix(path, "bulk-remove") {
+		wp.handleNodePoolBulkRemove(w, r)
 		return
 	}
 
@@ -184,12 +193,24 @@ func (wp *WebPanel) handleNodePoolByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]string{"message": "Node promoted successfully"})
+		case "quarantine":
+			if err := wp.subManager.QuarantineNode(id); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"message": "Node quarantined successfully"})
 		case "demote":
 			if err := wp.subManager.DemoteNode(id); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			writeJSON(w, http.StatusOK, map[string]string{"message": "Node demoted successfully"})
+			writeJSON(w, http.StatusOK, map[string]string{"message": "Node quarantined successfully"})
+		case "remove":
+			if err := wp.subManager.RemoveNode(id); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"message": "Node removed successfully"})
 		default:
 			writeError(w, http.StatusBadRequest, "unknown action: "+action)
 		}
@@ -206,7 +227,7 @@ func (wp *WebPanel) handleNodePoolByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Node deleted successfully"})
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Node removed successfully"})
 }
 
 // handleNodePoolConfig handles GET/PUT /api/v1/node-pool/config.
@@ -231,4 +252,32 @@ func (wp *WebPanel) handleNodePoolConfig(w http.ResponseWriter, r *http.Request)
 	default:
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (wp *WebPanel) handleNodePoolBulkRemove(w http.ResponseWriter, r *http.Request) {
+	if wp.subManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "subscription manager not initialized")
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var filter BulkRemoveFilter
+	if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	count, err := wp.subManager.BulkRemove(filter)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":      "Bulk remove completed",
+		"removedCount": count,
+	})
 }

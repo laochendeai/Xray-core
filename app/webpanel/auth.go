@@ -60,12 +60,18 @@ func (a *AuthManager) Login(username, password, clientIP string) (string, error)
 		a.mu.Unlock()
 		return "", fmt.Errorf("too many login attempts, please try again later")
 	}
-	a.attempts[clientIP] = append(recent, now)
 	a.mu.Unlock()
 
 	if username != a.username || password != a.password {
+		a.mu.Lock()
+		a.attempts[clientIP] = append(a.attempts[clientIP], now)
+		a.mu.Unlock()
 		return "", fmt.Errorf("invalid credentials")
 	}
+
+	a.mu.Lock()
+	delete(a.attempts, clientIP)
+	a.mu.Unlock()
 
 	return a.generateToken(username)
 }

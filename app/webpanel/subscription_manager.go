@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -16,14 +17,109 @@ import (
 	"github.com/xtls/xray-core/common/errors"
 	core "github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/routing"
-	"google.golang.org/protobuf/encoding/protojson"
 )
+
+type NodeStatus string
+
+const (
+	NodeStatusCandidate  NodeStatus = "candidate"
+	NodeStatusStaging    NodeStatus = "staging"
+	NodeStatusActive     NodeStatus = "active"
+	NodeStatusQuarantine NodeStatus = "quarantine"
+	NodeStatusRemoved    NodeStatus = "removed"
+)
+
+type TransitionReason string
+
+const (
+	TransitionReasonSubscriptionNodeDiscovered TransitionReason = "subscription_node_discovered"
+	TransitionReasonOutboundRegistrationFailed TransitionReason = "outbound_registration_failed"
+	TransitionReasonProbeQualified             TransitionReason = "probe_qualified"
+	TransitionReasonProbeRequalified           TransitionReason = "probe_requalified"
+	TransitionReasonProbeFailuresExceeded      TransitionReason = "probe_failures_exceeded"
+	TransitionReasonManualPromote              TransitionReason = "manual_promote"
+	TransitionReasonManualQuarantine           TransitionReason = "manual_quarantine"
+	TransitionReasonManualRemove               TransitionReason = "manual_remove"
+	TransitionReasonSubscriptionMissing        TransitionReason = "subscription_missing"
+	TransitionReasonSubscriptionDeleted        TransitionReason = "subscription_deleted"
+	TransitionReasonSubscriptionReintroduced   TransitionReason = "subscription_reintroduced"
+	TransitionReasonMigrationLegacyDemoted     TransitionReason = "migration_legacy_demoted"
+)
+
+type EventActor string
+
+const (
+	EventActorSystem    EventActor = "system"
+	EventActorOperator  EventActor = "operator"
+	EventActorMigration EventActor = "migration"
+)
+
+type CleanlinessStatus string
+
+const (
+	CleanlinessUnknown    CleanlinessStatus = "unknown"
+	CleanlinessTrusted    CleanlinessStatus = "trusted"
+	CleanlinessSuspicious CleanlinessStatus = "suspicious"
+)
+
+type BandwidthTier string
+
+const (
+	BandwidthTierUnknown BandwidthTier = "unknown"
+)
+
+type NodeEvent struct {
+	NodeID   string           `json:"nodeId"`
+	Remark   string           `json:"remark,omitempty"`
+	Status   NodeStatus       `json:"status"`
+	Reason   TransitionReason `json:"reason"`
+	Actor    EventActor       `json:"actor"`
+	At       time.Time        `json:"at"`
+	Details  string           `json:"details,omitempty"`
+	NodeAddr string           `json:"nodeAddress,omitempty"`
+}
+
+type PoolHealthSummary struct {
+	ActiveNodes     int       `json:"activeNodes"`
+	MinActiveNodes  int       `json:"minActiveNodes"`
+	Healthy         bool      `json:"healthy"`
+	LastEvaluatedAt time.Time `json:"lastEvaluatedAt"`
+}
+
+type NodePoolSummary struct {
+	CandidateCount      int              `json:"candidateCount"`
+	StagingCount        int              `json:"stagingCount"`
+	ActiveCount         int              `json:"activeCount"`
+	QuarantineCount     int              `json:"quarantineCount"`
+	RemovedCount        int              `json:"removedCount"`
+	TrustedCount        int              `json:"trustedCount"`
+	SuspiciousCount     int              `json:"suspiciousCount"`
+	UnknownCleanCount   int              `json:"unknownCleanCount"`
+	ActiveNodes         int              `json:"activeNodes"`
+	MinActiveNodes      int              `json:"minActiveNodes"`
+	Healthy             bool             `json:"healthy"`
+	LastEvaluatedAt     time.Time        `json:"lastEvaluatedAt"`
+	LatestEventAt       *time.Time       `json:"latestEventAt,omitempty"`
+	LatestEventReason   TransitionReason `json:"latestEventReason,omitempty"`
+	LatestEventStatus   NodeStatus       `json:"latestEventStatus,omitempty"`
+	LatestEventActor    EventActor       `json:"latestEventActor,omitempty"`
+	LatestEventNodeID   string           `json:"latestEventNodeId,omitempty"`
+	LatestEventNodeAddr string           `json:"latestEventNodeAddress,omitempty"`
+}
+
+type BulkRemoveFilter struct {
+	IDs          []string            `json:"ids,omitempty"`
+	Statuses     []NodeStatus        `json:"statuses,omitempty"`
+	Cleanliness  []CleanlinessStatus `json:"cleanliness,omitempty"`
+	OnlyUnstable bool                `json:"onlyUnstable,omitempty"`
+}
 
 // NodePoolState is the top-level persisted state.
 type NodePoolState struct {
 	Subscriptions    []SubscriptionRecord `json:"subscriptions"`
 	Nodes            []NodeRecord         `json:"nodes"`
 	ValidationConfig ValidationConfig     `json:"validationConfig"`
+	RecentNodeEvents []NodeEvent          `json:"recentNodeEvents,omitempty"`
 }
 
 // SubscriptionRecord represents a subscription source.
@@ -39,65 +135,100 @@ type SubscriptionRecord struct {
 
 // NodeRecord represents a node in the pool.
 type NodeRecord struct {
-	ID               string     `json:"id"`
-	URI              string     `json:"uri"`
-	Remark           string     `json:"remark"`
-	Protocol         string     `json:"protocol"`
-	Address          string     `json:"address"`
-	Port             int        `json:"port"`
-	OutboundTag      string     `json:"outboundTag"`
-	Status           string     `json:"status"` // staging / active / demoted
-	SubscriptionID   string     `json:"subscriptionId"`
-	AddedAt          time.Time  `json:"addedAt"`
-	PromotedAt       *time.Time `json:"promotedAt,omitempty"`
-	TotalPings       int        `json:"totalPings"`
-	FailedPings      int        `json:"failedPings"`
-	AvgDelayMs       int64      `json:"avgDelayMs"`
-	ConsecutiveFails int        `json:"consecutiveFails"`
-	LastCheckedAt    *time.Time `json:"lastCheckedAt,omitempty"`
+	ID               string            `json:"id"`
+	URI              string            `json:"uri"`
+	Remark           string            `json:"remark"`
+	Protocol         string            `json:"protocol"`
+	Address          string            `json:"address"`
+	Port             int               `json:"port"`
+	OutboundTag      string            `json:"outboundTag"`
+	Status           NodeStatus        `json:"status"`
+	StatusReason     TransitionReason  `json:"statusReason"`
+	SubscriptionID   string            `json:"subscriptionId"`
+	AddedAt          time.Time         `json:"addedAt"`
+	PromotedAt       *time.Time        `json:"promotedAt,omitempty"`
+	StatusUpdatedAt  *time.Time        `json:"statusUpdatedAt,omitempty"`
+	LastEventAt      *time.Time        `json:"lastEventAt,omitempty"`
+	TotalPings       int               `json:"totalPings"`
+	FailedPings      int               `json:"failedPings"`
+	AvgDelayMs       int64             `json:"avgDelayMs"`
+	ConsecutiveFails int               `json:"consecutiveFails"`
+	LastCheckedAt    *time.Time        `json:"lastCheckedAt,omitempty"`
+	Cleanliness      CleanlinessStatus `json:"cleanliness"`
+	BandwidthTier    BandwidthTier     `json:"bandwidthTier"`
 }
 
-// ValidationConfig holds the criteria for promoting/demoting nodes.
+// ValidationConfig holds the criteria for promoting/quarantining nodes.
 type ValidationConfig struct {
-	MinSamples       int     `json:"minSamples"`
-	MaxFailRate      float64 `json:"maxFailRate"`
-	MaxAvgDelayMs    int64   `json:"maxAvgDelayMs"`
-	ProbeIntervalSec int     `json:"probeIntervalSec"`
-	ProbeURL         string  `json:"probeUrl"`
-	DemoteAfterFails int     `json:"demoteAfterFails"`
-	AutoRemoveDemoted bool   `json:"autoRemoveDemoted"`
+	MinSamples        int     `json:"minSamples"`
+	MaxFailRate       float64 `json:"maxFailRate"`
+	MaxAvgDelayMs     int64   `json:"maxAvgDelayMs"`
+	ProbeIntervalSec  int     `json:"probeIntervalSec"`
+	ProbeURL          string  `json:"probeUrl"`
+	DemoteAfterFails  int     `json:"demoteAfterFails"`
+	AutoRemoveDemoted bool    `json:"autoRemoveDemoted"`
+	MinActiveNodes    int     `json:"minActiveNodes"`
+	MinBandwidthKbps  int     `json:"minBandwidthKbps"`
 }
 
 // SubscriptionManager manages subscriptions and the node pool lifecycle.
 type SubscriptionManager struct {
-	mu         sync.RWMutex
-	state      *NodePoolState
-	statePath  string
-	grpcClient *GRPCClient
-	prober     *NodeProber
-	instance   *core.Instance
-	stopCh     chan struct{}
-	refreshMu  sync.Mutex // prevents concurrent refreshes
+	mu                 sync.RWMutex
+	state              *NodePoolState
+	statePath          string
+	grpcClient         *GRPCClient
+	prober             *NodeProber
+	instance           *core.Instance
+	runtimeCtx         context.Context
+	stopCh             chan struct{}
+	refreshMu          sync.Mutex
+	saveCh             chan struct{}
+	saveDelay          time.Duration
+	onPoolHealthChange func(PoolHealthSummary)
+	bgWG               sync.WaitGroup
 }
 
+const (
+	nodeEventLimit         = 25
+	scheduledPersistDelay  = 350 * time.Millisecond
+	nodeProbeTagPrefix     = "pool_"
+	legacyDemotedStatus    = "demoted"
+	legacyStagingTagPrefix = "staging_"
+	legacyActiveTagPrefix  = "active_"
+)
+
 // NewSubscriptionManager creates a new SubscriptionManager.
-func NewSubscriptionManager(configPath string, grpcClient *GRPCClient, instance *core.Instance) *SubscriptionManager {
+func NewSubscriptionManager(configPath string, grpcClient *GRPCClient, instance *core.Instance, runtimeCtx context.Context) *SubscriptionManager {
 	statePath := filepath.Join(filepath.Dir(configPath), "node_pool_state.json")
 
 	sm := &SubscriptionManager{
 		statePath:  statePath,
 		grpcClient: grpcClient,
 		instance:   instance,
+		runtimeCtx: runtimeCtx,
 		stopCh:     make(chan struct{}),
+		saveCh:     make(chan struct{}, 1),
+		saveDelay:  scheduledPersistDelay,
 	}
 
-	sm.state = sm.loadState()
+	state, changed := sm.loadState()
+	sm.state = state
+	if changed {
+		sm.mu.Lock()
+		sm.writeStateLocked()
+		sm.mu.Unlock()
+	}
+
+	sm.bgWG.Add(1)
+	go func() {
+		defer sm.bgWG.Done()
+		sm.persistLoop()
+	}()
 	return sm
 }
 
 // Start initializes the prober and begins auto-refresh loops.
 func (sm *SubscriptionManager) Start() error {
-	// Get routing dispatcher for probing
 	var dispatcher routing.Dispatcher
 	if sm.instance != nil {
 		if f := sm.instance.GetFeature(routing.DispatcherType()); f != nil {
@@ -105,56 +236,83 @@ func (sm *SubscriptionManager) Start() error {
 		}
 	}
 
+	sm.mu.Lock()
+	normalized := sm.normalizeProbeStateLocked()
+	cfg := sm.state.ValidationConfig
+	tags := make([]string, 0, len(sm.state.Nodes))
+	for _, n := range sm.state.Nodes {
+		if isProbeableStatus(n.Status) && n.OutboundTag != "" {
+			tags = append(tags, n.OutboundTag)
+		}
+	}
+	sm.mu.Unlock()
+
+	if normalized {
+		sm.requestScheduledSave()
+		go sm.emitPoolHealth()
+	}
+
 	if dispatcher == nil {
 		errors.LogWarning(context.Background(), "node pool: routing dispatcher not available, probing disabled")
 	} else {
-		sm.mu.RLock()
-		cfg := sm.state.ValidationConfig
-		sm.mu.RUnlock()
-
-		sm.prober = NewNodeProber(dispatcher, cfg.ProbeURL, cfg.ProbeIntervalSec, sm.handleProbeResults)
-		// Register all existing staging/active nodes for probing
-		sm.mu.RLock()
-		for _, n := range sm.state.Nodes {
-			if n.Status == "staging" || n.Status == "active" {
-				sm.prober.AddTag(n.OutboundTag)
-			}
+		probeCtx := context.Background()
+		if sm.runtimeCtx != nil && core.FromContext(sm.runtimeCtx) != nil {
+			probeCtx = core.ToBackgroundDetachedContext(sm.runtimeCtx)
 		}
-		sm.mu.RUnlock()
+
+		sm.prober = NewNodeProber(probeCtx, dispatcher, cfg.ProbeURL, cfg.ProbeIntervalSec, sm.handleProbeResults)
+		for _, tag := range tags {
+			sm.prober.AddTag(tag)
+		}
 		sm.prober.Start()
 	}
 
-	// Start auto-refresh goroutine
-	go sm.autoRefreshLoop()
+	sm.bgWG.Add(1)
+	go func() {
+		defer sm.bgWG.Done()
+		sm.autoRefreshLoop()
+	}()
 
-	// Re-register existing staging/active outbounds
-	go sm.reregisterOutbounds()
-
+	sm.bgWG.Add(1)
+	go func() {
+		defer sm.bgWG.Done()
+		sm.reregisterOutbounds()
+	}()
+	sm.emitPoolHealth()
 	return nil
 }
 
 // Stop shuts down the manager.
 func (sm *SubscriptionManager) Stop() {
-	close(sm.stopCh)
+	select {
+	case <-sm.stopCh:
+	default:
+		close(sm.stopCh)
+	}
 	if sm.prober != nil {
 		sm.prober.Stop()
 	}
+	sm.bgWG.Wait()
 }
 
-// --- Subscription CRUD ---
+func (sm *SubscriptionManager) SetPoolHealthCallback(callback func(PoolHealthSummary)) {
+	sm.mu.Lock()
+	sm.onPoolHealthChange = callback
+	sm.mu.Unlock()
+	sm.emitPoolHealth()
+}
 
 // ListSubscriptions returns all subscriptions.
 func (sm *SubscriptionManager) ListSubscriptions() []SubscriptionRecord {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+
 	result := make([]SubscriptionRecord, len(sm.state.Subscriptions))
 	copy(result, sm.state.Subscriptions)
-
-	// Update node counts
 	for i := range result {
 		count := 0
 		for _, n := range sm.state.Nodes {
-			if n.SubscriptionID == result[i].ID {
+			if n.SubscriptionID == result[i].ID && n.Status != NodeStatusRemoved {
 				count++
 			}
 		}
@@ -168,18 +326,15 @@ func (sm *SubscriptionManager) AddSubscription(urlStr, remark string, autoRefres
 	id := hashID(urlStr)
 
 	sm.mu.Lock()
-	// Check for duplicates
 	for _, s := range sm.state.Subscriptions {
 		if s.ID == id {
 			sm.mu.Unlock()
 			return nil, fmt.Errorf("subscription already exists")
 		}
 	}
-
 	if refreshIntervalMin <= 0 {
 		refreshIntervalMin = 60
 	}
-
 	rec := SubscriptionRecord{
 		ID:              id,
 		URL:             urlStr,
@@ -188,30 +343,29 @@ func (sm *SubscriptionManager) AddSubscription(urlStr, remark string, autoRefres
 		RefreshInterval: refreshIntervalMin,
 	}
 	sm.state.Subscriptions = append(sm.state.Subscriptions, rec)
+	sm.writeStateLocked()
 	sm.mu.Unlock()
 
-	// Fetch and parse
 	if err := sm.refreshSubscription(id); err != nil {
-		// Roll back
 		sm.mu.Lock()
 		sm.removeSubscriptionLocked(id)
+		sm.writeStateLocked()
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("failed to fetch subscription: %w", err)
 	}
 
 	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 	for _, s := range sm.state.Subscriptions {
 		if s.ID == id {
-			rec = s
-			break
+			copyRec := s
+			return &copyRec, nil
 		}
 	}
-	sm.mu.RUnlock()
-
-	return &rec, nil
+	return nil, fmt.Errorf("subscription disappeared after creation")
 }
 
-// DeleteSubscription removes a subscription and all its nodes.
+// DeleteSubscription removes a subscription and marks its nodes removed.
 func (sm *SubscriptionManager) DeleteSubscription(id string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -227,21 +381,20 @@ func (sm *SubscriptionManager) DeleteSubscription(id string) error {
 		return fmt.Errorf("subscription not found")
 	}
 
-	// Remove all nodes belonging to this subscription
-	var remaining []NodeRecord
-	for _, n := range sm.state.Nodes {
-		if n.SubscriptionID == id {
-			sm.removeOutboundAsync(n.OutboundTag)
-			if sm.prober != nil {
-				sm.prober.RemoveTag(n.OutboundTag)
-			}
-		} else {
-			remaining = append(remaining, n)
+	for i := range sm.state.Nodes {
+		if sm.state.Nodes[i].SubscriptionID != id {
+			continue
+		}
+		if sm.state.Nodes[i].Status == NodeStatusRemoved {
+			continue
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusRemoved, TransitionReasonSubscriptionDeleted, EventActorSystem, "subscription deleted"); err != nil {
+			return err
 		}
 	}
-	sm.state.Nodes = remaining
 	sm.removeSubscriptionLocked(id)
-	sm.saveStateLocked()
+	sm.writeStateLocked()
+	go sm.emitPoolHealth()
 	return nil
 }
 
@@ -250,93 +403,213 @@ func (sm *SubscriptionManager) RefreshSubscription(id string) error {
 	return sm.refreshSubscription(id)
 }
 
-// --- Node Pool Operations ---
-
 // ListNodes returns nodes filtered by status (empty string = all).
 func (sm *SubscriptionManager) ListNodes(status string) []NodeRecord {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
-	var result []NodeRecord
+	if status == legacyDemotedStatus {
+		status = string(NodeStatusQuarantine)
+	}
+
+	result := make([]NodeRecord, 0, len(sm.state.Nodes))
 	for _, n := range sm.state.Nodes {
-		if status == "" || n.Status == status {
+		if status == "" || string(n.Status) == status {
 			result = append(result, n)
 		}
 	}
+	sort.SliceStable(result, func(i, j int) bool {
+		return nodeTime(result[i]).After(nodeTime(result[j]))
+	})
 	return result
 }
 
-// PromoteNode manually promotes a staging node to active.
-func (sm *SubscriptionManager) PromoteNode(id string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
+func (sm *SubscriptionManager) ListNodesByStatuses(statuses ...NodeStatus) []NodeRecord {
+	if len(statuses) == 0 {
+		return sm.ListNodes("")
+	}
+	allowed := make(map[NodeStatus]struct{}, len(statuses))
+	for _, status := range statuses {
+		allowed[status] = struct{}{}
+	}
 
-	for i, n := range sm.state.Nodes {
-		if n.ID == id {
-			if n.Status != "staging" {
-				return fmt.Errorf("node is not in staging status")
-			}
-			return sm.promoteNodeLocked(i)
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	result := make([]NodeRecord, 0, len(sm.state.Nodes))
+	for _, n := range sm.state.Nodes {
+		if _, ok := allowed[n.Status]; ok {
+			result = append(result, n)
 		}
 	}
-	return fmt.Errorf("node not found")
+	sort.SliceStable(result, func(i, j int) bool {
+		return nodeTime(result[i]).After(nodeTime(result[j]))
+	})
+	return result
 }
 
-// DemoteNode manually demotes an active node.
-func (sm *SubscriptionManager) DemoteNode(id string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	for i, n := range sm.state.Nodes {
-		if n.ID == id {
-			if n.Status != "active" {
-				return fmt.Errorf("node is not in active status")
-			}
-			return sm.demoteNodeLocked(i)
-		}
-	}
-	return fmt.Errorf("node not found")
+func (sm *SubscriptionManager) ListRecentNodeEvents(limit int) []NodeEvent {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return copyRecentNodeEvents(sm.state.RecentNodeEvents, limit)
 }
 
-// DeleteNode removes a single node.
-func (sm *SubscriptionManager) DeleteNode(id string) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	for i, n := range sm.state.Nodes {
-		if n.ID == id {
-			sm.removeOutboundAsync(n.OutboundTag)
-			if sm.prober != nil {
-				sm.prober.RemoveTag(n.OutboundTag)
-			}
-			sm.state.Nodes = append(sm.state.Nodes[:i], sm.state.Nodes[i+1:]...)
-			sm.saveStateLocked()
-			return nil
-		}
-	}
-	return fmt.Errorf("node not found")
+func (sm *SubscriptionManager) GetPoolSummary() NodePoolSummary {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.poolSummaryLocked()
 }
 
-// GetValidationConfig returns the current validation config.
 func (sm *SubscriptionManager) GetValidationConfig() ValidationConfig {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.state.ValidationConfig
 }
 
-// UpdateValidationConfig updates the validation config.
 func (sm *SubscriptionManager) UpdateValidationConfig(cfg ValidationConfig) {
+	applyValidationDefaults(&cfg)
+
 	sm.mu.Lock()
 	sm.state.ValidationConfig = cfg
-	sm.saveStateLocked()
+	sm.writeStateLocked()
 	sm.mu.Unlock()
 
 	if sm.prober != nil {
 		sm.prober.UpdateConfig(cfg.ProbeURL, cfg.ProbeIntervalSec)
 	}
+	sm.emitPoolHealth()
 }
 
-// --- Internal ---
+// PromoteNode manually promotes a staging/quarantine node into active.
+func (sm *SubscriptionManager) PromoteNode(id string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for i, n := range sm.state.Nodes {
+		if n.ID != id {
+			continue
+		}
+		if n.Status != NodeStatusStaging && n.Status != NodeStatusQuarantine {
+			return fmt.Errorf("node is not in a promotable status")
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusActive, TransitionReasonManualPromote, EventActorOperator, "manual promote"); err != nil {
+			return err
+		}
+		sm.writeStateLocked()
+		go sm.emitPoolHealth()
+		return nil
+	}
+	return fmt.Errorf("node not found")
+}
+
+// DemoteNode keeps backward compatibility with the old API and now quarantines the node.
+func (sm *SubscriptionManager) DemoteNode(id string) error {
+	return sm.QuarantineNode(id)
+}
+
+// QuarantineNode manually moves a node out of the active pool without deleting it.
+func (sm *SubscriptionManager) QuarantineNode(id string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for i, n := range sm.state.Nodes {
+		if n.ID != id {
+			continue
+		}
+		if n.Status != NodeStatusActive && n.Status != NodeStatusStaging {
+			return fmt.Errorf("node is not in an active or staging status")
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusQuarantine, TransitionReasonManualQuarantine, EventActorOperator, "manual quarantine"); err != nil {
+			return err
+		}
+		sm.writeStateLocked()
+		go sm.emitPoolHealth()
+		return nil
+	}
+	return fmt.Errorf("node not found")
+}
+
+// DeleteNode removes a single node from the working system while preserving it in removed state.
+func (sm *SubscriptionManager) DeleteNode(id string) error {
+	return sm.RemoveNode(id)
+}
+
+func (sm *SubscriptionManager) RemoveNode(id string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for i, n := range sm.state.Nodes {
+		if n.ID != id {
+			continue
+		}
+		if n.Status == NodeStatusRemoved {
+			return nil
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusRemoved, TransitionReasonManualRemove, EventActorOperator, "manual remove"); err != nil {
+			return err
+		}
+		sm.writeStateLocked()
+		go sm.emitPoolHealth()
+		return nil
+	}
+	return fmt.Errorf("node not found")
+}
+
+func (sm *SubscriptionManager) BulkRemove(filter BulkRemoveFilter) (int, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	idSet := make(map[string]struct{}, len(filter.IDs))
+	for _, id := range filter.IDs {
+		idSet[id] = struct{}{}
+	}
+	statusSet := make(map[NodeStatus]struct{}, len(filter.Statuses))
+	for _, status := range filter.Statuses {
+		statusSet[status] = struct{}{}
+	}
+	cleanSet := make(map[CleanlinessStatus]struct{}, len(filter.Cleanliness))
+	for _, value := range filter.Cleanliness {
+		cleanSet[value] = struct{}{}
+	}
+
+	removed := 0
+	for i := range sm.state.Nodes {
+		node := sm.state.Nodes[i]
+		if node.Status == NodeStatusRemoved {
+			continue
+		}
+		if len(idSet) > 0 {
+			if _, ok := idSet[node.ID]; !ok {
+				continue
+			}
+		}
+		if len(statusSet) > 0 {
+			if _, ok := statusSet[node.Status]; !ok {
+				continue
+			}
+		}
+		if len(cleanSet) > 0 {
+			if _, ok := cleanSet[node.Cleanliness]; !ok {
+				continue
+			}
+		}
+		if filter.OnlyUnstable && node.Status != NodeStatusQuarantine {
+			continue
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusRemoved, TransitionReasonManualRemove, EventActorOperator, "bulk remove"); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+
+	if removed == 0 {
+		return 0, nil
+	}
+
+	sm.writeStateLocked()
+	go sm.emitPoolHealth()
+	return removed, nil
+}
 
 func (sm *SubscriptionManager) refreshSubscription(id string) error {
 	sm.refreshMu.Lock()
@@ -346,7 +619,8 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 	var sub *SubscriptionRecord
 	for i := range sm.state.Subscriptions {
 		if sm.state.Subscriptions[i].ID == id {
-			sub = &sm.state.Subscriptions[i]
+			copySub := sm.state.Subscriptions[i]
+			sub = &copySub
 			break
 		}
 	}
@@ -356,7 +630,6 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 		return fmt.Errorf("subscription not found")
 	}
 
-	// Fetch subscription URL
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(sub.URL)
 	if err != nil {
@@ -364,7 +637,7 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return fmt.Errorf("failed to read subscription body: %w", err)
 	}
@@ -374,10 +647,11 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 		return fmt.Errorf("failed to parse subscription content: %w", err)
 	}
 
+	now := time.Now()
+
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Build map of existing nodes for this subscription
 	existingByID := make(map[string]int)
 	for i, n := range sm.state.Nodes {
 		if n.SubscriptionID == id {
@@ -385,8 +659,7 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 		}
 	}
 
-	// Process new links
-	newNodeIDs := make(map[string]bool)
+	newNodeIDs := make(map[string]bool, len(links))
 	for _, link := range links {
 		uri, _ := GenerateShareLink(*link)
 		if uri == "" {
@@ -395,12 +668,27 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 		nodeID := hashID(uri)
 		newNodeIDs[nodeID] = true
 
-		if _, exists := existingByID[nodeID]; exists {
-			continue // already tracked
+		if idx, exists := existingByID[nodeID]; exists {
+			node := &sm.state.Nodes[idx]
+			node.URI = uri
+			node.Remark = link.Remark
+			node.Protocol = link.Protocol
+			node.Address = link.Address
+			node.Port = link.Port
+
+			if node.Status == NodeStatusCandidate && node.StatusReason == TransitionReasonOutboundRegistrationFailed {
+				if err := sm.applyTransitionLocked(idx, NodeStatusStaging, TransitionReasonSubscriptionReintroduced, EventActorSystem, "retry outbound registration"); err != nil {
+					sm.applyTransitionLocked(idx, NodeStatusCandidate, TransitionReasonOutboundRegistrationFailed, EventActorSystem, err.Error())
+				}
+			}
+			if node.Status == NodeStatusRemoved && node.StatusReason == TransitionReasonSubscriptionMissing {
+				if err := sm.applyTransitionLocked(idx, NodeStatusStaging, TransitionReasonSubscriptionReintroduced, EventActorSystem, "subscription reintroduced"); err != nil {
+					sm.applyTransitionLocked(idx, NodeStatusRemoved, TransitionReasonSubscriptionMissing, EventActorSystem, err.Error())
+				}
+			}
+			continue
 		}
 
-		// New node → register as staging
-		tag := "staging_" + nodeID
 		node := NodeRecord{
 			ID:             nodeID,
 			URI:            uri,
@@ -408,54 +696,53 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 			Protocol:       link.Protocol,
 			Address:        link.Address,
 			Port:           link.Port,
-			OutboundTag:    tag,
-			Status:         "staging",
+			Status:         NodeStatusCandidate,
+			StatusReason:   TransitionReasonSubscriptionNodeDiscovered,
 			SubscriptionID: id,
-			AddedAt:        time.Now(),
+			AddedAt:        now,
+			Cleanliness:    CleanlinessUnknown,
+			BandwidthTier:  BandwidthTierUnknown,
 		}
-
-		if err := sm.addOutboundFromLink(link, tag); err != nil {
-			errors.LogWarning(context.Background(), "node pool: failed to add outbound for ", tag, ": ", err.Error())
-			continue
-		}
-
 		sm.state.Nodes = append(sm.state.Nodes, node)
-		if sm.prober != nil {
-			sm.prober.AddTag(tag)
+		idx := len(sm.state.Nodes) - 1
+		if err := sm.applyTransitionLocked(idx, NodeStatusStaging, TransitionReasonSubscriptionNodeDiscovered, EventActorSystem, "subscription refresh discovered a new node"); err != nil {
+			sm.applyTransitionLocked(idx, NodeStatusCandidate, TransitionReasonOutboundRegistrationFailed, EventActorSystem, err.Error())
 		}
 	}
 
-	// Remove nodes that are no longer in the subscription
-	var remaining []NodeRecord
-	for _, n := range sm.state.Nodes {
-		if n.SubscriptionID == id && !newNodeIDs[n.ID] {
-			sm.removeOutboundAsync(n.OutboundTag)
-			if sm.prober != nil {
-				sm.prober.RemoveTag(n.OutboundTag)
-			}
+	for i := range sm.state.Nodes {
+		node := sm.state.Nodes[i]
+		if node.SubscriptionID != id {
 			continue
 		}
-		remaining = append(remaining, n)
-	}
-	sm.state.Nodes = remaining
-
-	// Update subscription record
-	now := time.Now()
-	for i := range sm.state.Subscriptions {
-		if sm.state.Subscriptions[i].ID == id {
-			sm.state.Subscriptions[i].LastRefresh = &now
-			count := 0
-			for _, n := range sm.state.Nodes {
-				if n.SubscriptionID == id {
-					count++
-				}
-			}
-			sm.state.Subscriptions[i].NodeCount = count
-			break
+		if newNodeIDs[node.ID] {
+			continue
+		}
+		if node.Status == NodeStatusRemoved {
+			continue
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusRemoved, TransitionReasonSubscriptionMissing, EventActorSystem, "node disappeared from upstream subscription"); err != nil {
+			return err
 		}
 	}
 
-	sm.saveStateLocked()
+	for i := range sm.state.Subscriptions {
+		if sm.state.Subscriptions[i].ID != id {
+			continue
+		}
+		sm.state.Subscriptions[i].LastRefresh = &now
+		count := 0
+		for _, n := range sm.state.Nodes {
+			if n.SubscriptionID == id && n.Status != NodeStatusRemoved {
+				count++
+			}
+		}
+		sm.state.Subscriptions[i].NodeCount = count
+		break
+	}
+
+	sm.writeStateLocked()
+	go sm.emitPoolHealth()
 	return nil
 }
 
@@ -465,123 +752,201 @@ func (sm *SubscriptionManager) handleProbeResults(results []ProbeResult) {
 
 	now := time.Now()
 	cfg := sm.state.ValidationConfig
-	needSave := false
+	changed := false
 
-	for _, r := range results {
-		idx := sm.findNodeByTag(r.Tag)
+	for _, result := range results {
+		idx := sm.findNodeByTag(result.Tag)
 		if idx < 0 {
 			continue
 		}
 		node := &sm.state.Nodes[idx]
+		if !isProbeableStatus(node.Status) {
+			continue
+		}
+
 		node.TotalPings++
 		node.LastCheckedAt = &now
-		needSave = true
+		node.LastEventAt = &now
+		changed = true
 
-		if r.Success {
+		if result.Success {
 			node.ConsecutiveFails = 0
-			// Update running average delay
-			if node.AvgDelayMs == 0 {
-				node.AvgDelayMs = r.DelayMs
+			successCount := node.TotalPings - node.FailedPings
+			if successCount <= 1 || node.AvgDelayMs == 0 {
+				node.AvgDelayMs = result.DelayMs
 			} else {
-				node.AvgDelayMs = (node.AvgDelayMs*int64(node.TotalPings-node.FailedPings-1) + r.DelayMs) / int64(node.TotalPings-node.FailedPings)
+				node.AvgDelayMs = (node.AvgDelayMs*int64(successCount-1) + result.DelayMs) / int64(successCount)
 			}
 		} else {
 			node.FailedPings++
 			node.ConsecutiveFails++
 		}
 
-		// Auto-promote: staging → active
-		if node.Status == "staging" && node.TotalPings >= cfg.MinSamples {
-			failRate := float64(node.FailedPings) / float64(node.TotalPings)
-			if failRate <= cfg.MaxFailRate && node.AvgDelayMs <= cfg.MaxAvgDelayMs {
-				sm.promoteNodeLocked(idx)
-			}
+		failRate := float64(0)
+		if node.TotalPings > 0 {
+			failRate = float64(node.FailedPings) / float64(node.TotalPings)
 		}
 
-		// Auto-demote: active → demoted
-		if node.Status == "active" && node.ConsecutiveFails >= cfg.DemoteAfterFails {
-			sm.demoteNodeLocked(idx)
+		switch node.Status {
+		case NodeStatusStaging:
+			if result.Success && node.TotalPings >= cfg.MinSamples && failRate <= cfg.MaxFailRate && node.AvgDelayMs > 0 && node.AvgDelayMs <= cfg.MaxAvgDelayMs {
+				sm.applyTransitionLocked(idx, NodeStatusActive, TransitionReasonProbeQualified, EventActorSystem, "validation thresholds satisfied")
+			}
+		case NodeStatusActive:
+			if node.ConsecutiveFails >= cfg.DemoteAfterFails {
+				target := NodeStatusQuarantine
+				details := "consecutive probe failures exceeded threshold"
+				if cfg.AutoRemoveDemoted {
+					target = NodeStatusRemoved
+					details = "auto-remove enabled after repeated probe failures"
+				}
+				sm.applyTransitionLocked(idx, target, TransitionReasonProbeFailuresExceeded, EventActorSystem, details)
+			}
+		case NodeStatusQuarantine:
+			if result.Success && node.TotalPings >= cfg.MinSamples && failRate <= cfg.MaxFailRate && node.AvgDelayMs > 0 && node.AvgDelayMs <= cfg.MaxAvgDelayMs {
+				sm.applyTransitionLocked(idx, NodeStatusActive, TransitionReasonProbeRequalified, EventActorSystem, "quarantined node re-qualified")
+			}
 		}
 	}
 
-	if needSave {
-		sm.saveStateLocked()
+	if changed {
+		sm.requestScheduledSave()
+		go sm.emitPoolHealth()
 	}
 }
 
-func (sm *SubscriptionManager) promoteNodeLocked(idx int) error {
-	node := &sm.state.Nodes[idx]
-	oldTag := node.OutboundTag
-	newTag := "active_" + node.ID
+func (sm *SubscriptionManager) applyTransitionLocked(idx int, nextStatus NodeStatus, reason TransitionReason, actor EventActor, details string) error {
+	if idx < 0 || idx >= len(sm.state.Nodes) {
+		return fmt.Errorf("invalid node index")
+	}
 
-	// Parse the original link to rebuild outbound
+	node := &sm.state.Nodes[idx]
+	currentStatus := node.Status
+	if !isAllowedNodeTransition(currentStatus, nextStatus) {
+		return fmt.Errorf("illegal node transition: %s -> %s", currentStatus, nextStatus)
+	}
+
+	switch {
+	case !isProbeableStatus(currentStatus) && isProbeableStatus(nextStatus):
+		if err := sm.ensureProbeableLocked(node); err != nil {
+			return err
+		}
+	case isProbeableStatus(currentStatus) && !isProbeableStatus(nextStatus):
+		sm.removeProbeableLocked(node)
+	case isProbeableStatus(currentStatus) && isProbeableStatus(nextStatus):
+		if node.OutboundTag == "" {
+			if err := sm.ensureProbeableLocked(node); err != nil {
+				return err
+			}
+		}
+	}
+
+	now := time.Now()
+	node.Status = nextStatus
+	node.StatusReason = reason
+	node.StatusUpdatedAt = &now
+	node.LastEventAt = &now
+	if nextStatus == NodeStatusActive {
+		node.PromotedAt = &now
+		node.ConsecutiveFails = 0
+	}
+	if nextStatus == NodeStatusCandidate || nextStatus == NodeStatusRemoved {
+		node.OutboundTag = ""
+	}
+
+	sm.appendNodeEventLocked(NodeEvent{
+		NodeID:   node.ID,
+		Remark:   node.Remark,
+		Status:   node.Status,
+		Reason:   reason,
+		Actor:    actor,
+		At:       now,
+		Details:  details,
+		NodeAddr: fmt.Sprintf("%s:%d", node.Address, node.Port),
+	})
+
+	switch reason {
+	case TransitionReasonProbeFailuresExceeded:
+		errors.LogWarning(context.Background(), "node pool: quarantined node ", node.Remark, " (", node.ID, ")")
+	case TransitionReasonProbeQualified, TransitionReasonProbeRequalified, TransitionReasonManualPromote:
+		errors.LogInfo(context.Background(), "node pool: activated node ", node.Remark, " (", node.ID, ")")
+	case TransitionReasonManualRemove, TransitionReasonSubscriptionMissing, TransitionReasonSubscriptionDeleted:
+		errors.LogInfo(context.Background(), "node pool: removed node ", node.Remark, " (", node.ID, ")")
+	}
+
+	return nil
+}
+
+func (sm *SubscriptionManager) normalizeProbeStateLocked() bool {
+	cfg := sm.state.ValidationConfig
+	if cfg.DemoteAfterFails <= 0 {
+		return false
+	}
+
+	changed := false
+	for idx := range sm.state.Nodes {
+		node := &sm.state.Nodes[idx]
+		if node.Status != NodeStatusActive {
+			continue
+		}
+		if node.ConsecutiveFails < cfg.DemoteAfterFails {
+			continue
+		}
+		if err := sm.applyTransitionLocked(idx, NodeStatusQuarantine, TransitionReasonProbeFailuresExceeded, EventActorSystem, "startup normalization: active node exceeded consecutive probe failure threshold"); err == nil {
+			changed = true
+		}
+	}
+
+	return changed
+}
+
+func (sm *SubscriptionManager) ensureProbeableLocked(node *NodeRecord) error {
+	if node.OutboundTag == "" {
+		node.OutboundTag = probeOutboundTag(node.ID)
+	}
+
 	link, err := ParseShareLinkURI(node.URI)
 	if err != nil {
 		return fmt.Errorf("failed to parse node URI: %w", err)
 	}
 
-	// Remove old staging outbound
-	sm.removeOutboundAsync(oldTag)
+	if err := sm.addOutboundFromLink(link, node.OutboundTag); err != nil {
+		return fmt.Errorf("failed to add outbound %q: %w", node.OutboundTag, err)
+	}
 	if sm.prober != nil {
-		sm.prober.RemoveTag(oldTag)
+		sm.prober.AddTag(node.OutboundTag)
 	}
-
-	// Add new active outbound
-	if err := sm.addOutboundFromLink(link, newTag); err != nil {
-		return fmt.Errorf("failed to add active outbound: %w", err)
-	}
-
-	now := time.Now()
-	node.OutboundTag = newTag
-	node.Status = "active"
-	node.PromotedAt = &now
-
-	if sm.prober != nil {
-		sm.prober.AddTag(newTag)
-	}
-
-	errors.LogInfo(context.Background(), "node pool: promoted node ", node.Remark, " (", node.ID, ")")
 	return nil
 }
 
-func (sm *SubscriptionManager) demoteNodeLocked(idx int) error {
-	node := &sm.state.Nodes[idx]
-
+func (sm *SubscriptionManager) removeProbeableLocked(node *NodeRecord) {
+	if node.OutboundTag == "" {
+		return
+	}
 	sm.removeOutboundAsync(node.OutboundTag)
 	if sm.prober != nil {
 		sm.prober.RemoveTag(node.OutboundTag)
 	}
-
-	node.Status = "demoted"
-	node.OutboundTag = ""
-	errors.LogInfo(context.Background(), "node pool: demoted node ", node.Remark, " (", node.ID, ")")
-
-	if sm.state.ValidationConfig.AutoRemoveDemoted {
-		sm.state.Nodes = append(sm.state.Nodes[:idx], sm.state.Nodes[idx+1:]...)
-	}
-
-	return nil
 }
 
 func (sm *SubscriptionManager) addOutboundFromLink(link *ShareLinkRequest, tag string) error {
-	outJSON, err := BuildOutboundJSON(link, tag)
+	if sm.grpcClient == nil {
+		return fmt.Errorf("grpc client is not initialized")
+	}
+
+	outboundConfig, err := buildOutboundHandlerConfigFromLink(link, tag)
 	if err != nil {
 		return err
 	}
 
-	var outboundConfig core.OutboundHandlerConfig
-	if err := protojson.Unmarshal(outJSON, &outboundConfig); err != nil {
-		return fmt.Errorf("failed to unmarshal outbound config: %w", err)
-	}
-
 	_, err = sm.grpcClient.Handler().AddOutbound(sm.grpcClient.Context(), &handlerservice.AddOutboundRequest{
-		Outbound: &outboundConfig,
+		Outbound: outboundConfig,
 	})
 	return err
 }
 
 func (sm *SubscriptionManager) removeOutboundAsync(tag string) {
-	if tag == "" {
+	if tag == "" || sm.grpcClient == nil {
 		return
 	}
 	go func() {
@@ -595,7 +960,7 @@ func (sm *SubscriptionManager) removeOutboundAsync(tag string) {
 }
 
 func (sm *SubscriptionManager) removeSubscriptionLocked(id string) {
-	var remaining []SubscriptionRecord
+	remaining := sm.state.Subscriptions[:0]
 	for _, s := range sm.state.Subscriptions {
 		if s.ID != id {
 			remaining = append(remaining, s)
@@ -631,11 +996,8 @@ func (sm *SubscriptionManager) autoRefreshLoop() {
 				if !sub.AutoRefresh {
 					continue
 				}
-				if sub.LastRefresh != nil {
-					elapsed := time.Since(*sub.LastRefresh)
-					if elapsed < time.Duration(sub.RefreshInterval)*time.Minute {
-						continue
-					}
+				if sub.LastRefresh != nil && time.Since(*sub.LastRefresh) < time.Duration(sub.RefreshInterval)*time.Minute {
+					continue
 				}
 				if err := sm.refreshSubscription(sub.ID); err != nil {
 					errors.LogWarning(context.Background(), "node pool: auto-refresh failed for ", sub.Remark, ": ", err.Error())
@@ -646,50 +1008,176 @@ func (sm *SubscriptionManager) autoRefreshLoop() {
 }
 
 func (sm *SubscriptionManager) reregisterOutbounds() {
-	// Wait for gRPC to be ready
-	time.Sleep(2 * time.Second)
+	select {
+	case <-sm.stopCh:
+		return
+	case <-time.After(2 * time.Second):
+	}
 
 	sm.mu.RLock()
 	nodes := make([]NodeRecord, len(sm.state.Nodes))
 	copy(nodes, sm.state.Nodes)
 	sm.mu.RUnlock()
 
-	for _, n := range nodes {
-		if n.Status == "staging" || n.Status == "active" {
-			link, err := ParseShareLinkURI(n.URI)
-			if err != nil {
-				continue
-			}
-			if err := sm.addOutboundFromLink(link, n.OutboundTag); err != nil {
-				errors.LogDebug(context.Background(), "node pool: failed to re-register outbound ", n.OutboundTag, ": ", err.Error())
-			}
+	for _, node := range nodes {
+		if !isProbeableStatus(node.Status) || node.OutboundTag == "" {
+			continue
 		}
+		link, err := ParseShareLinkURI(node.URI)
+		if err != nil {
+			continue
+		}
+		if err := sm.addOutboundFromLink(link, node.OutboundTag); err != nil {
+			errors.LogDebug(context.Background(), "node pool: failed to re-register outbound ", node.OutboundTag, ": ", err.Error())
+		}
+	}
+}
+
+func (sm *SubscriptionManager) persistLoop() {
+	var timer *time.Timer
+	var timerCh <-chan time.Time
+
+	for {
+		select {
+		case <-sm.stopCh:
+			if timer != nil {
+				stopTimer(timer)
+			}
+			sm.mu.Lock()
+			sm.writeStateLocked()
+			sm.mu.Unlock()
+			return
+		case <-sm.saveCh:
+			if timer == nil {
+				timer = time.NewTimer(sm.saveDelay)
+			} else {
+				stopTimer(timer)
+				timer.Reset(sm.saveDelay)
+			}
+			timerCh = timer.C
+		case <-timerCh:
+			sm.mu.Lock()
+			sm.writeStateLocked()
+			sm.mu.Unlock()
+			timerCh = nil
+		}
+	}
+}
+
+func (sm *SubscriptionManager) requestScheduledSave() {
+	select {
+	case sm.saveCh <- struct{}{}:
+	default:
+	}
+}
+
+func (sm *SubscriptionManager) emitPoolHealth() {
+	sm.mu.RLock()
+	callback := sm.onPoolHealthChange
+	summary := sm.poolHealthLocked()
+	sm.mu.RUnlock()
+	if callback != nil {
+		go callback(summary)
+	}
+}
+
+func (sm *SubscriptionManager) poolSummaryLocked() NodePoolSummary {
+	summary := NodePoolSummary{
+		MinActiveNodes:  sm.state.ValidationConfig.MinActiveNodes,
+		LastEvaluatedAt: time.Now(),
+	}
+
+	for _, node := range sm.state.Nodes {
+		switch node.Status {
+		case NodeStatusCandidate:
+			summary.CandidateCount++
+		case NodeStatusStaging:
+			summary.StagingCount++
+		case NodeStatusActive:
+			summary.ActiveCount++
+		case NodeStatusQuarantine:
+			summary.QuarantineCount++
+		case NodeStatusRemoved:
+			summary.RemovedCount++
+		}
+
+		switch node.Cleanliness {
+		case CleanlinessTrusted:
+			summary.TrustedCount++
+		case CleanlinessSuspicious:
+			summary.SuspiciousCount++
+		default:
+			summary.UnknownCleanCount++
+		}
+	}
+
+	summary.ActiveNodes = summary.ActiveCount
+	summary.Healthy = summary.ActiveNodes >= summary.MinActiveNodes
+
+	if events := sm.state.RecentNodeEvents; len(events) > 0 {
+		latest := events[len(events)-1]
+		summary.LatestEventAt = &latest.At
+		summary.LatestEventReason = latest.Reason
+		summary.LatestEventStatus = latest.Status
+		summary.LatestEventActor = latest.Actor
+		summary.LatestEventNodeID = latest.NodeID
+		summary.LatestEventNodeAddr = latest.NodeAddr
+	}
+
+	return summary
+}
+
+func (sm *SubscriptionManager) poolHealthLocked() PoolHealthSummary {
+	summary := sm.poolSummaryLocked()
+	return PoolHealthSummary{
+		ActiveNodes:     summary.ActiveNodes,
+		MinActiveNodes:  summary.MinActiveNodes,
+		Healthy:         summary.Healthy,
+		LastEvaluatedAt: summary.LastEvaluatedAt,
+	}
+}
+
+func (sm *SubscriptionManager) appendNodeEventLocked(event NodeEvent) {
+	sm.state.RecentNodeEvents = append(sm.state.RecentNodeEvents, event)
+	if len(sm.state.RecentNodeEvents) > nodeEventLimit {
+		sm.state.RecentNodeEvents = append([]NodeEvent(nil), sm.state.RecentNodeEvents[len(sm.state.RecentNodeEvents)-nodeEventLimit:]...)
 	}
 }
 
 // --- Persistence ---
 
-func (sm *SubscriptionManager) loadState() *NodePoolState {
+func (sm *SubscriptionManager) loadState() (*NodePoolState, bool) {
 	state := &NodePoolState{
 		ValidationConfig: defaultValidationConfig(),
 	}
 
 	data, err := os.ReadFile(sm.statePath)
 	if err != nil {
-		return state
+		return state, false
 	}
 
 	if err := json.Unmarshal(data, state); err != nil {
 		errors.LogWarning(context.Background(), "node pool: failed to parse state file: ", err.Error())
-		return &NodePoolState{ValidationConfig: defaultValidationConfig()}
+		return &NodePoolState{ValidationConfig: defaultValidationConfig()}, false
 	}
 
-	// Ensure defaults
 	applyValidationDefaults(&state.ValidationConfig)
-	return state
+	changed := false
+	now := time.Now()
+	for i := range state.Nodes {
+		if normalizeNodeRecord(&state.Nodes[i], now) {
+			changed = true
+		}
+	}
+	if len(state.RecentNodeEvents) > nodeEventLimit {
+		state.RecentNodeEvents = append([]NodeEvent(nil), state.RecentNodeEvents[len(state.RecentNodeEvents)-nodeEventLimit:]...)
+		changed = true
+	}
+
+	return state, changed
 }
 
-func (sm *SubscriptionManager) saveStateLocked() {
+func (sm *SubscriptionManager) writeStateLocked() {
 	data, err := json.MarshalIndent(sm.state, "", "  ")
 	if err != nil {
 		errors.LogWarning(context.Background(), "node pool: failed to marshal state: ", err.Error())
@@ -697,7 +1185,10 @@ func (sm *SubscriptionManager) saveStateLocked() {
 	}
 
 	dir := filepath.Dir(sm.statePath)
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		errors.LogWarning(context.Background(), "node pool: failed to create state dir: ", err.Error())
+		return
+	}
 
 	if err := os.WriteFile(sm.statePath, data, 0o644); err != nil {
 		errors.LogWarning(context.Background(), "node pool: failed to save state: ", err.Error())
@@ -707,12 +1198,14 @@ func (sm *SubscriptionManager) saveStateLocked() {
 func defaultValidationConfig() ValidationConfig {
 	return ValidationConfig{
 		MinSamples:        10,
-		MaxFailRate:       0.3,
+		MaxFailRate:       0.30,
 		MaxAvgDelayMs:     1000,
 		ProbeIntervalSec:  60,
 		ProbeURL:          "https://www.gstatic.com/generate_204",
 		DemoteAfterFails:  5,
 		AutoRemoveDemoted: false,
+		MinActiveNodes:    3,
+		MinBandwidthKbps:  0,
 	}
 }
 
@@ -721,7 +1214,7 @@ func applyValidationDefaults(cfg *ValidationConfig) {
 		cfg.MinSamples = 10
 	}
 	if cfg.MaxFailRate <= 0 {
-		cfg.MaxFailRate = 0.3
+		cfg.MaxFailRate = 0.30
 	}
 	if cfg.MaxAvgDelayMs <= 0 {
 		cfg.MaxAvgDelayMs = 1000
@@ -735,9 +1228,154 @@ func applyValidationDefaults(cfg *ValidationConfig) {
 	if cfg.DemoteAfterFails <= 0 {
 		cfg.DemoteAfterFails = 5
 	}
+	if cfg.MinActiveNodes <= 0 {
+		cfg.MinActiveNodes = 3
+	}
+	if cfg.MinBandwidthKbps < 0 {
+		cfg.MinBandwidthKbps = 0
+	}
+}
+
+func normalizeNodeRecord(node *NodeRecord, now time.Time) bool {
+	changed := false
+
+	switch node.Status {
+	case NodeStatus(""), NodeStatus(legacyDemotedStatus):
+		if string(node.Status) == legacyDemotedStatus {
+			node.Status = NodeStatusQuarantine
+			node.StatusReason = TransitionReasonMigrationLegacyDemoted
+		} else {
+			node.Status = NodeStatusStaging
+		}
+		changed = true
+	}
+
+	if node.Cleanliness == "" {
+		node.Cleanliness = CleanlinessUnknown
+		changed = true
+	}
+	if node.BandwidthTier == "" {
+		node.BandwidthTier = BandwidthTierUnknown
+		changed = true
+	}
+	if isProbeableStatus(node.Status) {
+		expectedTag := probeOutboundTag(node.ID)
+		if node.OutboundTag == "" || hasLegacyStatusTag(node.OutboundTag) || node.OutboundTag != expectedTag {
+			node.OutboundTag = expectedTag
+			changed = true
+		}
+	} else if node.OutboundTag != "" {
+		node.OutboundTag = ""
+		changed = true
+	}
+
+	if node.StatusUpdatedAt == nil {
+		ts := node.AddedAt
+		if ts.IsZero() {
+			ts = now
+		}
+		node.StatusUpdatedAt = &ts
+		changed = true
+	}
+	if node.LastEventAt == nil && node.StatusUpdatedAt != nil {
+		ts := *node.StatusUpdatedAt
+		node.LastEventAt = &ts
+		changed = true
+	}
+	if node.StatusReason == "" {
+		switch node.Status {
+		case NodeStatusActive:
+			node.StatusReason = TransitionReasonManualPromote
+		case NodeStatusQuarantine:
+			node.StatusReason = TransitionReasonMigrationLegacyDemoted
+		case NodeStatusRemoved:
+			node.StatusReason = TransitionReasonManualRemove
+		case NodeStatusCandidate:
+			node.StatusReason = TransitionReasonOutboundRegistrationFailed
+		default:
+			node.StatusReason = TransitionReasonSubscriptionNodeDiscovered
+		}
+		changed = true
+	}
+	return changed
+}
+
+func copyRecentNodeEvents(events []NodeEvent, limit int) []NodeEvent {
+	if limit <= 0 || limit > len(events) {
+		limit = len(events)
+	}
+	result := make([]NodeEvent, 0, limit)
+	for i := len(events) - 1; i >= 0 && len(result) < limit; i-- {
+		result = append(result, events[i])
+	}
+	return result
+}
+
+func hasLegacyStatusTag(tag string) bool {
+	return len(tag) > 0 && (len(tag) >= len(legacyStagingTagPrefix) && tag[:len(legacyStagingTagPrefix)] == legacyStagingTagPrefix ||
+		len(tag) >= len(legacyActiveTagPrefix) && tag[:len(legacyActiveTagPrefix)] == legacyActiveTagPrefix)
+}
+
+func isProbeableStatus(status NodeStatus) bool {
+	switch status {
+	case NodeStatusStaging, NodeStatusActive, NodeStatusQuarantine:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAllowedNodeTransition(current, next NodeStatus) bool {
+	if current == next {
+		return true
+	}
+
+	switch current {
+	case NodeStatusCandidate:
+		return next == NodeStatusStaging || next == NodeStatusRemoved
+	case NodeStatusStaging:
+		return next == NodeStatusActive || next == NodeStatusQuarantine || next == NodeStatusRemoved
+	case NodeStatusActive:
+		return next == NodeStatusQuarantine || next == NodeStatusRemoved
+	case NodeStatusQuarantine:
+		return next == NodeStatusActive || next == NodeStatusRemoved
+	case NodeStatusRemoved:
+		return next == NodeStatusStaging
+	default:
+		return false
+	}
+}
+
+func probeOutboundTag(nodeID string) string {
+	return nodeProbeTagPrefix + nodeID
+}
+
+func nodeTime(node NodeRecord) time.Time {
+	if node.StatusUpdatedAt != nil {
+		return *node.StatusUpdatedAt
+	}
+	if node.LastEventAt != nil {
+		return *node.LastEventAt
+	}
+	if node.LastCheckedAt != nil {
+		return *node.LastCheckedAt
+	}
+	return node.AddedAt
+}
+
+func stopTimer(timer *time.Timer) {
+	if timer == nil {
+		return
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 }
 
 func hashID(input string) string {
 	h := sha256.Sum256([]byte(input))
-	return fmt.Sprintf("%x", h[:6]) // 12 hex chars
+	return fmt.Sprintf("%x", h[:6])
 }

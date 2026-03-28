@@ -1,11 +1,11 @@
 package webpanel
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
-
-	"github.com/xtls/xray-core/common/uuid"
 )
 
 // handleShareGenerate handles POST /api/v1/share/generate.
@@ -83,7 +83,6 @@ func (wp *WebPanel) handleSubscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func generateSubToken(secret string) string {
-	// Use first 8 chars of UUID generated from secret as token
-	u := uuid.New()
-	return u.String()[:8]
+	sum := sha256.Sum256([]byte("xray-webpanel-sub:" + secret))
+	return hex.EncodeToString(sum[:])[:16]
 }

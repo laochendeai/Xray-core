@@ -2,7 +2,9 @@
 
 # Build the frontend and then the Go binary
 build: web
-	cp -r web/dist app/webpanel/dist
+	rm -rf app/webpanel/dist
+	mkdir -p app/webpanel/dist
+	cp -a web/dist/. app/webpanel/dist/
 	go build -o xray ./main
 
 # Build frontend only

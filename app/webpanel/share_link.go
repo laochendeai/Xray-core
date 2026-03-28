@@ -10,26 +10,33 @@ import (
 
 // ShareLinkRequest represents a share link generation request.
 type ShareLinkRequest struct {
-	Protocol  string                 `json:"protocol"`
-	Address   string                 `json:"address"`
-	Port      int                    `json:"port"`
-	UUID      string                 `json:"uuid"`
-	Password  string                 `json:"password"`
-	Email     string                 `json:"email"`
-	Security  string                 `json:"security"`
-	Flow      string                 `json:"flow"`
-	Type      string                 `json:"type"`      // Transport type: tcp, ws, grpc, etc.
-	Host      string                 `json:"host"`
-	Path      string                 `json:"path"`
-	TLS       string                 `json:"tls"`       // tls, reality, none
-	SNI       string                 `json:"sni"`
-	ALPN      string                 `json:"alpn"`
-	Fingerprint string              `json:"fingerprint"`
-	PublicKey string                 `json:"publicKey"` // REALITY
-	ShortID   string                 `json:"shortId"`   // REALITY
-	SpiderX   string                 `json:"spiderX"`   // REALITY
-	Remark    string                 `json:"remark"`
-	Extra     map[string]string      `json:"extra"`
+	Protocol      string            `json:"protocol"`
+	Address       string            `json:"address"`
+	Port          int               `json:"port"`
+	Version       int               `json:"version"`
+	UUID          string            `json:"uuid"`
+	Password      string            `json:"password"`
+	Email         string            `json:"email"`
+	Security      string            `json:"security"`
+	Flow          string            `json:"flow"`
+	Type          string            `json:"type"` // Transport type: tcp, ws, grpc, etc.
+	Host          string            `json:"host"`
+	Path          string            `json:"path"`
+	TLS           string            `json:"tls"` // tls, reality, none
+	AllowInsecure bool              `json:"allowInsecure"`
+	SNI           string            `json:"sni"`
+	ALPN          string            `json:"alpn"`
+	Fingerprint   string            `json:"fingerprint"`
+	PinSHA256     string            `json:"pinSHA256"`
+	PublicKey     string            `json:"publicKey"` // REALITY
+	ShortID       string            `json:"shortId"`   // REALITY
+	SpiderX       string            `json:"spiderX"`   // REALITY
+	Plugin        string            `json:"plugin"`
+	Congestion    string            `json:"congestion"`
+	Obfs          string            `json:"obfs"`
+	ObfsPassword  string            `json:"obfsPassword"`
+	Remark        string            `json:"remark"`
+	Extra         map[string]string `json:"extra"`
 }
 
 // GenerateShareLink generates a share link URI from the request.
@@ -43,6 +50,8 @@ func GenerateShareLink(req ShareLinkRequest) (string, error) {
 		return generateTrojanLink(req)
 	case "shadowsocks", "ss":
 		return generateSSLink(req)
+	case "hysteria", "hysteria2":
+		return generateHysteria2Link(req)
 	default:
 		return "", fmt.Errorf("unsupported protocol: %s", req.Protocol)
 	}
@@ -64,6 +73,9 @@ func generateVLESSLink(req ShareLinkRequest) (string, error) {
 	}
 	if req.TLS != "" && req.TLS != "none" {
 		params.Set("security", req.TLS)
+	}
+	if req.AllowInsecure {
+		params.Set("skip-cert-verify", "true")
 	}
 	if req.Flow != "" {
 		params.Set("flow", req.Flow)
@@ -162,6 +174,9 @@ func generateTrojanLink(req ShareLinkRequest) (string, error) {
 	if req.TLS != "" && req.TLS != "none" {
 		params.Set("security", req.TLS)
 	}
+	if req.AllowInsecure {
+		params.Set("skip-cert-verify", "true")
+	}
 	if req.SNI != "" {
 		params.Set("sni", req.SNI)
 	}
@@ -210,8 +225,75 @@ func generateSSLink(req ShareLinkRequest) (string, error) {
 		remark = req.Email
 	}
 
+	params := url.Values{}
+	if req.Plugin != "" {
+		params.Set("plugin", req.Plugin)
+	}
+	for k, v := range req.Extra {
+		params.Set(k, v)
+	}
+
+	query := params.Encode()
+	if query != "" {
+		return fmt.Sprintf("ss://%s@%s:%d/?%s#%s",
+			userInfo, req.Address, req.Port, query,
+			url.PathEscape(remark),
+		), nil
+	}
+
 	return fmt.Sprintf("ss://%s@%s:%d#%s",
 		userInfo, req.Address, req.Port,
+		url.PathEscape(remark),
+	), nil
+}
+
+func generateHysteria2Link(req ShareLinkRequest) (string, error) {
+	if req.Password == "" || req.Address == "" || req.Port == 0 {
+		return "", fmt.Errorf("auth, address, and port are required for Hysteria2")
+	}
+
+	params := url.Values{}
+	if req.SNI != "" {
+		params.Set("sni", req.SNI)
+	}
+	if req.ALPN != "" {
+		params.Set("alpn", req.ALPN)
+	}
+	if req.Congestion != "" {
+		params.Set("congestion_control", req.Congestion)
+	}
+	if req.AllowInsecure {
+		params.Set("insecure", "1")
+	}
+	if req.PinSHA256 != "" {
+		params.Set("pinSHA256", req.PinSHA256)
+	}
+	if req.Obfs != "" {
+		params.Set("obfs", req.Obfs)
+	}
+	if req.ObfsPassword != "" {
+		params.Set("obfs-password", req.ObfsPassword)
+	}
+	for k, v := range req.Extra {
+		params.Set(k, v)
+	}
+
+	remark := req.Remark
+	if remark == "" {
+		remark = req.Email
+	}
+
+	query := params.Encode()
+	if query != "" {
+		return fmt.Sprintf("hysteria2://%s@%s:%d?%s#%s",
+			url.PathEscape(req.Password), req.Address, req.Port,
+			query,
+			url.PathEscape(remark),
+		), nil
+	}
+
+	return fmt.Sprintf("hysteria2://%s@%s:%d#%s",
+		url.PathEscape(req.Password), req.Address, req.Port,
 		url.PathEscape(remark),
 	), nil
 }
@@ -220,14 +302,14 @@ func generateSSLink(req ShareLinkRequest) (string, error) {
 func GenerateSubscriptionLinks(configData json.RawMessage) (string, error) {
 	var config struct {
 		Inbounds []struct {
-			Protocol string          `json:"protocol"`
-			Port     int             `json:"port"`
-			Tag      string          `json:"tag"`
-			Listen   string          `json:"listen"`
-			Settings json.RawMessage `json:"settings"`
+			Protocol       string          `json:"protocol"`
+			Port           int             `json:"port"`
+			Tag            string          `json:"tag"`
+			Listen         string          `json:"listen"`
+			Settings       json.RawMessage `json:"settings"`
 			StreamSettings struct {
-				Network  string `json:"network"`
-				Security string `json:"security"`
+				Network    string `json:"network"`
+				Security   string `json:"security"`
 				WSSettings struct {
 					Path    string            `json:"path"`
 					Headers map[string]string `json:"headers"`

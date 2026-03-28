@@ -58,6 +58,11 @@ coverage.*
 
 # Node modules (in case of frontend assets)
 node_modules/
+runtime/
+backups/
+control_plane_state.json
+node_pool_state.json
+dev-config.current-nodes.json
 
 # System files
 Thumbs.db

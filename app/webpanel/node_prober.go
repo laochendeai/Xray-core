@@ -26,6 +26,7 @@ type ProbeCallback func(results []ProbeResult)
 // NodeProber performs periodic health checks on nodes via their outbound tags.
 type NodeProber struct {
 	mu         sync.RWMutex
+	baseCtx    context.Context
 	ctx        context.Context
 	cancel     context.CancelFunc
 	dispatcher routing.Dispatcher
@@ -38,15 +39,19 @@ type NodeProber struct {
 }
 
 // NewNodeProber creates a new NodeProber.
-func NewNodeProber(dispatcher routing.Dispatcher, probeURL string, intervalSec int, callback ProbeCallback) *NodeProber {
+func NewNodeProber(baseCtx context.Context, dispatcher routing.Dispatcher, probeURL string, intervalSec int, callback ProbeCallback) *NodeProber {
 	if probeURL == "" {
 		probeURL = "https://www.gstatic.com/generate_204"
 	}
 	if intervalSec <= 0 {
 		intervalSec = 60
 	}
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
 
 	return &NodeProber{
+		baseCtx:    baseCtx,
 		dispatcher: dispatcher,
 		probeURL:   probeURL,
 		interval:   time.Duration(intervalSec) * time.Second,
@@ -63,7 +68,7 @@ func (p *NodeProber) Start() {
 		p.mu.Unlock()
 		return
 	}
-	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.ctx, p.cancel = context.WithCancel(p.baseCtx)
 	p.running = true
 	p.mu.Unlock()
 

@@ -3,9 +3,11 @@ package webpanel
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -18,13 +20,16 @@ import (
 // WebPanel is the main feature that runs the web management panel.
 type WebPanel struct {
 	sync.Mutex
-	config     *Config
-	server     *http.Server
-	listener   net.Listener
-	grpcClient *GRPCClient
-	auth       *AuthManager
-	instance   *core.Instance
-	subManager *SubscriptionManager
+	config       *Config
+	server       *http.Server
+	listener     net.Listener
+	grpcClient   *GRPCClient
+	auth         *AuthManager
+	instance     *core.Instance
+	runtimeCtx   context.Context
+	subManager   *SubscriptionManager
+	tunManager   *TunManager
+	controlPlane *ControlPlaneStateStore
 }
 
 // NewWebPanel creates a new WebPanel instance from config.
@@ -36,6 +41,7 @@ func NewWebPanel(ctx context.Context, config *Config) (*WebPanel, error) {
 	s := core.FromContext(ctx)
 	if s != nil {
 		wp.instance = s
+		wp.runtimeCtx = ctx
 	}
 
 	return wp, nil
@@ -86,7 +92,10 @@ func (wp *WebPanel) Start() error {
 
 	// Initialize subscription manager if configPath is available
 	if wp.config.ConfigPath != "" {
-		wp.subManager = NewSubscriptionManager(wp.config.ConfigPath, wp.grpcClient, wp.instance)
+		wp.subManager = NewSubscriptionManager(wp.config.ConfigPath, wp.grpcClient, wp.instance, wp.runtimeCtx)
+		wp.tunManager, _ = NewTunManager(wp.config.ConfigPath)
+		wp.controlPlane = NewControlPlaneStateStore(wp.config.ConfigPath)
+		wp.subManager.SetPoolHealthCallback(wp.handlePoolHealthChange)
 	}
 
 	// Build HTTP mux
@@ -94,9 +103,9 @@ func (wp *WebPanel) Start() error {
 	wp.registerRoutes(mux)
 
 	wp.server = &http.Server{
-		Handler:      mux,
+		Handler:      wp.recoverMiddleware(mux),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 5 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -131,8 +140,24 @@ func (wp *WebPanel) Start() error {
 			errors.LogWarning(context.Background(), "failed to start subscription manager: ", err.Error())
 		}
 	}
+	if wp.controlPlane != nil {
+		wp.ensureCleanStartupState()
+	}
 
 	return nil
+}
+
+func (wp *WebPanel) recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				errors.LogError(context.Background(), "web panel handler panic: ", recovered, "\n", string(debug.Stack()))
+				writeError(w, http.StatusInternalServerError, "Internal server error")
+			}
+		}()
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (wp *WebPanel) Close() error {
@@ -195,6 +220,14 @@ func (wp *WebPanel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/config/validate", wp.authMiddleware(wp.handleConfigValidate))
 	mux.HandleFunc("/api/v1/config/backups", wp.authMiddleware(wp.handleConfigBackups))
 
+	// Transparent TUN
+	mux.HandleFunc("/api/v1/tun/status", wp.authMiddleware(wp.handleTunStatus))
+	mux.HandleFunc("/api/v1/tun/start", wp.authMiddleware(wp.handleTunStart))
+	mux.HandleFunc("/api/v1/tun/stop", wp.authMiddleware(wp.handleTunStop))
+	mux.HandleFunc("/api/v1/tun/restore-clean", wp.authMiddleware(wp.handleTunRestoreClean))
+	mux.HandleFunc("/api/v1/tun/toggle", wp.authMiddleware(wp.handleTunToggle))
+	mux.HandleFunc("/api/v1/tun/install-privilege", wp.authMiddleware(wp.handleTunInstallPrivilege))
+
 	// Share link
 	mux.HandleFunc("/api/v1/share/generate", wp.authMiddleware(wp.handleShareGenerate))
 
@@ -235,6 +268,26 @@ func (wp *WebPanel) handleStaticFiles(w http.ResponseWriter, r *http.Request) {
 		path = "/index.html"
 	} else {
 		f.Close()
+	}
+
+	if path == "/index.html" {
+		indexFile, err := distFS.Open("index.html")
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		defer indexFile.Close()
+
+		data, err := io.ReadAll(indexFile)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+		return
 	}
 
 	fileServer := http.FileServer(http.FS(distFS))

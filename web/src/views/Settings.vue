@@ -3,6 +3,88 @@
     <h2>{{ t('settings.title') }}</h2>
 
     <n-tabs v-model:value="activeTab" type="line">
+      <n-tab-pane name="tun" :tab="t('settings.tun')">
+        <n-space vertical :size="12">
+          <n-alert type="info" :title="t('settings.tunSafetyTitle')">
+            {{ t('settings.tunSafetyDesc') }}
+          </n-alert>
+
+          <n-card size="small">
+            <n-space vertical :size="16">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap">
+                <n-space align="center" :size="12">
+                  <strong>{{ t('settings.transparentMode') }}</strong>
+                  <n-tag :type="tunStatusType" size="small">
+                    {{ tunStatusText }}
+                  </n-tag>
+                </n-space>
+                <n-space :size="12" align="center">
+                  <n-button type="warning" secondary :loading="installingTunBootstrap" @click="handleInstallTunBootstrap">
+                    {{ t('settings.installTunPrivilege') }}
+                  </n-button>
+                  <n-button @click="goToNodePool">
+                    {{ t('settings.openNodePool') }}
+                  </n-button>
+                  <n-button @click="fetchTunStatus" :loading="loadingTun">
+                    {{ t('common.refresh') }}
+                  </n-button>
+                </n-space>
+              </div>
+
+              <n-alert type="info" :title="t('settings.primaryControlsTitle')">
+                {{ t('settings.primaryControlsDesc') }}
+              </n-alert>
+
+              <n-alert v-if="tunStatus.message" :type="tunStatus.running ? 'success' : (tunStatus.available ? 'warning' : 'error')">
+                {{ tunStatus.message }}
+              </n-alert>
+
+              <n-alert v-if="tunStatus.useSudo && !tunStatus.elevationReady" type="warning" :title="t('settings.tunPrivilegeTitle')">
+                {{ t('settings.tunPrivilegeDesc') }}
+              </n-alert>
+
+              <n-alert v-if="!tunStatus.helperExists" type="error">
+                {{ t('settings.tunHelperMissing') }}
+              </n-alert>
+
+              <n-alert v-if="tunRepairRecommended" type="warning" :title="t('settings.tunRepairTitle')">
+                {{ t('settings.tunRepairDesc') }}
+              </n-alert>
+
+              <n-card v-if="tunBootstrapNeeded" size="small" embedded>
+                <n-space justify="space-between" align="center" wrap>
+                  <div>{{ t('settings.tunInstallDesc') }}</div>
+                  <n-button type="warning" secondary :loading="installingTunBootstrap" @click="handleInstallTunBootstrap">
+                    {{ t('settings.installTunPrivilege') }}
+                  </n-button>
+                </n-space>
+              </n-card>
+
+              <n-descriptions bordered :column="1" size="small">
+                <n-descriptions-item :label="t('settings.machineState')">{{ machineStateText }}</n-descriptions-item>
+                <n-descriptions-item :label="t('settings.lastFallbackReason')">{{ machineReasonText }}</n-descriptions-item>
+                <n-descriptions-item :label="t('settings.transparentMode')">{{ tunStatus.running ? t('common.enabled') : t('common.disabled') }}</n-descriptions-item>
+                <n-descriptions-item :label="t('settings.localOnly')">{{ tunStatus.allowRemote ? t('common.disabled') : t('common.enabled') }}</n-descriptions-item>
+                <n-descriptions-item :label="t('settings.tunInterface')">{{ tunStatus.interfaceName || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="MTU">{{ tunStatus.mtu || '-' }}</n-descriptions-item>
+                <n-descriptions-item :label="t('settings.remoteDns')">{{ (tunStatus.remoteDns || []).join(', ') || '-' }}</n-descriptions-item>
+                <n-descriptions-item :label="t('settings.privilegeMode')">{{ tunStatus.useSudo ? 'sudo -n' : 'direct' }}</n-descriptions-item>
+                <n-descriptions-item :label="t('settings.helperPath')">{{ tunStatus.helperPath || '-' }}</n-descriptions-item>
+                <n-descriptions-item :label="t('settings.runtimeConfigPath')">{{ tunStatus.runtimeConfigPath || '-' }}</n-descriptions-item>
+              </n-descriptions>
+
+              <n-alert v-if="tunDiagnostics.length" type="warning" :title="t('settings.tunDiagnostics')">
+                <div v-for="item in tunDiagnostics" :key="item">{{ item }}</div>
+              </n-alert>
+
+              <n-card v-if="tunStatus.lastOutput" size="small" embedded>
+                <pre style="margin: 0; white-space: pre-wrap; word-break: break-word">{{ tunStatus.lastOutput }}</pre>
+              </n-card>
+            </n-space>
+          </n-card>
+        </n-space>
+      </n-tab-pane>
+
       <!-- Log -->
       <n-tab-pane name="log" :tab="t('settings.log')">
         <n-card size="small">
@@ -58,21 +140,46 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { NSpace, NTabs, NTabPane, NCard, NDescriptions, NDescriptionsItem, NButton, NDataTable, NEmpty, useMessage, type DataTableColumns } from 'naive-ui'
+import { computed, ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { NSpace, NTabs, NTabPane, NCard, NDescriptions, NDescriptionsItem, NButton, NDataTable, NEmpty, NAlert, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { configAPI, loggerAPI, observatoryAPI } from '@/api/client'
+import { configAPI, loggerAPI, observatoryAPI, tunAPI } from '@/api/client'
+import type { MachineState, MachineStateReason } from '@/api/types'
 
 const { t } = useI18n()
 const message = useMessage()
+const router = useRouter()
 
-const activeTab = ref('log')
+const activeTab = ref('tun')
 const logConfig = ref<any>({})
 const policyConfig = ref<any>(null)
 const apiConfig = ref<any>(null)
 const obsStatus = ref<any[]>([])
 const loadingObs = ref(false)
 const restarting = ref(false)
+const loadingTun = ref(false)
+const installingTunBootstrap = ref(false)
+const tunStatus = ref<any>({
+  status: 'unknown',
+  running: false,
+  available: false,
+  allowRemote: false,
+  useSudo: true,
+  helperExists: false,
+  elevationReady: false,
+  helperCurrent: true,
+  binaryCurrent: true,
+  privilegeInstallRecommended: false,
+  helperPath: '',
+  runtimeConfigPath: '',
+  interfaceName: '',
+  mtu: 0,
+  remoteDns: [],
+  message: '',
+  lastOutput: '',
+  diagnostics: []
+})
 
 const obsColumns: DataTableColumns = [
   { title: 'Outbound', key: 'outboundTag' },
@@ -80,6 +187,25 @@ const obsColumns: DataTableColumns = [
   { title: 'Delay (ms)', key: 'delay' },
   { title: 'Error', key: 'lastErrorReason', ellipsis: { tooltip: true } }
 ]
+
+const tunStatusText = computed(() => {
+  if (tunStatus.value.running) return t('common.enabled')
+  if (tunStatus.value.status === 'error' || tunStatus.value.status === 'unavailable') return t('common.error')
+  return t('common.disabled')
+})
+
+const tunStatusType = computed(() => {
+  if (tunStatus.value.running) return 'success'
+  if (tunStatus.value.status === 'blocked') return 'warning'
+  if (tunStatus.value.status === 'error' || tunStatus.value.status === 'unavailable') return 'error'
+  return 'warning'
+})
+
+const tunDiagnostics = computed(() => Array.isArray(tunStatus.value.diagnostics) ? tunStatus.value.diagnostics : [])
+const tunBootstrapNeeded = computed(() => Boolean(tunStatus.value.privilegeInstallRecommended))
+const tunRepairRecommended = computed(() => tunStatus.value.helperCurrent === false || tunStatus.value.binaryCurrent === false)
+const machineStateText = computed(() => translateCode('nodePool.machineStateLabel', (tunStatus.value.machineState || 'clean') as MachineState))
+const machineReasonText = computed(() => translateCode('nodePool.reason', (tunStatus.value.lastStateReason || 'startup_default_clean') as MachineStateReason))
 
 async function loadConfig() {
   try {
@@ -117,8 +243,61 @@ async function handleRestartLogger() {
   }
 }
 
+function applyTunStatus(data: any) {
+  tunStatus.value = {
+    ...tunStatus.value,
+    ...data,
+    diagnostics: Array.isArray(data?.diagnostics) ? data.diagnostics : []
+  }
+}
+
+async function fetchTunStatus() {
+  loadingTun.value = true
+  try {
+    const data = await tunAPI.status()
+    applyTunStatus(data)
+  } catch (err: any) {
+    applyTunStatus({
+      status: 'error',
+      running: false,
+      available: false,
+      message: err?.message || err?.error || t('common.error'),
+      lastOutput: err?.lastOutput || '',
+      diagnostics: err?.diagnostics || []
+    })
+  } finally {
+    loadingTun.value = false
+  }
+}
+
+async function handleInstallTunBootstrap() {
+  installingTunBootstrap.value = true
+  try {
+    const data = await tunAPI.installPrivilege()
+    applyTunStatus(data)
+    message.success(data.message || t('common.success'))
+  } catch (err: any) {
+    if (err?.status) {
+      applyTunStatus(err)
+    }
+    message.error(err?.message || err?.error || t('common.error'))
+    await fetchTunStatus()
+  } finally {
+    installingTunBootstrap.value = false
+  }
+}
+
+function translateCode(prefix: string, code: string) {
+  return t(`${prefix}.${code}`)
+}
+
+function goToNodePool() {
+  router.push('/node-pool')
+}
+
 onMounted(() => {
   loadConfig()
   fetchObservatory()
+  fetchTunStatus()
 })
 </script>

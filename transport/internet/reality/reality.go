@@ -116,6 +116,7 @@ func (c *UConn) VerifyPeerCertificate(rawCerts [][]byte, verifiedChains [][]*x50
 
 func UClient(c net.Conn, config *Config, ctx context.Context, dest net.Destination) (net.Conn, error) {
 	localAddr := c.LocalAddr().String()
+	spiderY := normalizedSpiderY(config.SpiderY)
 	uConn := &UConn{
 		Config: config,
 	}
@@ -229,13 +230,13 @@ func UClient(c net.Conn, config *Config, ctx context.Context, dest net.Destinati
 				}
 				times := 1
 				if !first {
-					times = int(crypto.RandBetween(config.SpiderY[4], config.SpiderY[5]))
+					times = int(crypto.RandBetween(spiderY[4], spiderY[5]))
 				}
 				for j := 0; j < times; j++ {
 					if !first && j == 0 {
 						req.Header.Set("Referer", firstURL)
 					}
-					req.AddCookie(&http.Cookie{Name: "padding", Value: strings.Repeat("0", int(crypto.RandBetween(config.SpiderY[0], config.SpiderY[1])))})
+					req.AddCookie(&http.Cookie{Name: "padding", Value: strings.Repeat("0", int(crypto.RandBetween(spiderY[0], spiderY[1])))})
 					if resp, err = client.Do(req); err != nil {
 						break
 					}
@@ -259,18 +260,18 @@ func UClient(c net.Conn, config *Config, ctx context.Context, dest net.Destinati
 					}
 					maps.Unlock()
 					if !first {
-						time.Sleep(time.Duration(crypto.RandBetween(config.SpiderY[6], config.SpiderY[7])) * time.Millisecond) // interval
+						time.Sleep(time.Duration(crypto.RandBetween(spiderY[6], spiderY[7])) * time.Millisecond) // interval
 					}
 				}
 			}
 			get(true)
-			concurrency := int(crypto.RandBetween(config.SpiderY[2], config.SpiderY[3]))
+			concurrency := int(crypto.RandBetween(spiderY[2], spiderY[3]))
 			for i := 0; i < concurrency; i++ {
 				go get(false)
 			}
 			// Do not close the connection
 		}()
-		time.Sleep(time.Duration(crypto.RandBetween(config.SpiderY[8], config.SpiderY[9])) * time.Millisecond) // return
+		time.Sleep(time.Duration(crypto.RandBetween(spiderY[8], spiderY[9])) * time.Millisecond) // return
 		return nil, errors.New("REALITY: processed invalid connection").AtWarning()
 	}
 	return uConn, nil
@@ -296,4 +297,12 @@ func getPathLocked(paths map[string]struct{}) string {
 		i++
 	}
 	return "/"
+}
+
+func normalizedSpiderY(values []int64) []int64 {
+	const spiderSlots = 10
+
+	normalized := make([]int64, spiderSlots)
+	copy(normalized, values)
+	return normalized
 }

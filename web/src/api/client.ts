@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { NodePoolDashboardResponse, TunStatusResponse, ValidationConfig } from './types'
 
 const apiClient = axios.create({
   baseURL: '/api/v1',
@@ -88,6 +89,16 @@ export const configAPI = {
     apiClient.post('/config/backups', { action: 'restore', name }) as Promise<any>
 }
 
+export const tunAPI = {
+  status: () => apiClient.get('/tun/status') as Promise<TunStatusResponse>,
+  start: () => apiClient.post('/tun/start') as Promise<TunStatusResponse>,
+  stop: () => apiClient.post('/tun/stop') as Promise<TunStatusResponse>,
+  restoreClean: () => apiClient.post('/tun/restore-clean') as Promise<TunStatusResponse>,
+  toggle: () => apiClient.post('/tun/toggle') as Promise<TunStatusResponse>,
+  installPrivilege: () =>
+    apiClient.post('/tun/install-privilege', undefined, { timeout: 120000 }) as Promise<TunStatusResponse>
+}
+
 export const shareAPI = {
   generate: (params: any) => apiClient.post('/share/generate', params) as Promise<any>
 }
@@ -102,12 +113,16 @@ export const subscriptionAPI = {
 
 export const nodePoolAPI = {
   list: (status?: string) =>
-    apiClient.get('/node-pool', { params: status ? { status } : {} }) as Promise<any>,
+    apiClient.get('/node-pool', { params: status ? { status } : {} }) as Promise<NodePoolDashboardResponse>,
   promote: (id: string) => apiClient.post(`/node-pool/${id}/promote`) as Promise<any>,
+  quarantine: (id: string) => apiClient.post(`/node-pool/${id}/quarantine`) as Promise<any>,
   demote: (id: string) => apiClient.post(`/node-pool/${id}/demote`) as Promise<any>,
+  remove: (id: string) => apiClient.post(`/node-pool/${id}/remove`) as Promise<any>,
+  bulkRemove: (payload: { ids?: string[]; statuses?: string[]; cleanliness?: string[]; onlyUnstable?: boolean }) =>
+    apiClient.post('/node-pool/bulk-remove', payload) as Promise<any>,
   delete: (id: string) => apiClient.delete(`/node-pool/${id}`) as Promise<any>,
-  getConfig: () => apiClient.get('/node-pool/config') as Promise<any>,
-  updateConfig: (config: any) => apiClient.put('/node-pool/config', config) as Promise<any>
+  getConfig: () => apiClient.get('/node-pool/config') as Promise<ValidationConfig>,
+  updateConfig: (config: ValidationConfig) => apiClient.put('/node-pool/config', config) as Promise<any>
 }
 
 export default apiClient

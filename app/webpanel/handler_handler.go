@@ -187,14 +187,14 @@ func (wp *WebPanel) addOutbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var outboundConfig core.OutboundHandlerConfig
-	if err := protojson.Unmarshal(req.Outbound, &outboundConfig); err != nil {
+	outboundConfig, err := decodeOutboundHandlerConfig(req.Outbound)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid outbound config: "+err.Error())
 		return
 	}
 
-	_, err := wp.grpcClient.Handler().AddOutbound(wp.grpcClient.Context(), &handlerservice.AddOutboundRequest{
-		Outbound: &outboundConfig,
+	_, err = wp.grpcClient.Handler().AddOutbound(wp.grpcClient.Context(), &handlerservice.AddOutboundRequest{
+		Outbound: outboundConfig,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to add outbound: "+err.Error())
