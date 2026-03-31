@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -410,7 +409,7 @@ func (m *TunManager) installPrivilegeLocked(settings *TunFeatureSettings) (strin
 	cmd := exec.Command("pkexec", installArgs...)
 	// Detach from the launch terminal so pkexec uses the desktop polkit agent
 	// instead of prompting on the hidden controlling TTY of the web panel process.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	detachFromControllingTTY(cmd)
 	output, err := cmd.CombinedOutput()
 	trimmed := strings.TrimSpace(string(output))
 	if err != nil {
