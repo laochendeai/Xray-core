@@ -62,6 +62,53 @@
       </n-space>
     </n-alert>
 
+    <n-card size="small" class="section-block tun-settings-card" :title="t('nodePool.transparentRoutingConfig')">
+      <n-space vertical :size="12">
+        <n-alert type="info">
+          {{ t('nodePool.transparentRoutingDesc') }}
+        </n-alert>
+        <n-alert type="success" :title="t('nodePool.recommendedConfigTitle')">
+          {{ t('nodePool.recommendedConfigBody') }}
+        </n-alert>
+        <n-alert v-if="tunStatus.running" type="warning">
+          {{ t('nodePool.transparentRoutingRunningHint') }}
+        </n-alert>
+        <div class="node-pool-meta">{{ t('nodePool.transparentRoutingWhitelistHint') }}</div>
+        <div v-if="tunSettingsForm.routeMode === 'auto_tested'" class="node-pool-meta">
+          {{ t('nodePool.routeModeAutoHint') }}
+        </div>
+        <n-form :model="tunSettingsForm" label-placement="left" label-width="220px">
+          <n-form-item :label="t('nodePool.routeMode')">
+            <n-select v-model:value="tunSettingsForm.routeMode" :options="routeModeOptions" />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.selectionPolicy')">
+            <n-select v-model:value="tunSettingsForm.selectionPolicy" :options="selectionPolicyOptions" />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.protectDomains')">
+            <n-input
+              v-model:value="tunProtectDomainsText"
+              type="textarea"
+              :autosize="{ minRows: 4, maxRows: 10 }"
+              :placeholder="t('nodePool.protectDomainsPlaceholder')"
+            />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.protectCidrs')">
+            <n-input
+              v-model:value="tunProtectCidrsText"
+              type="textarea"
+              :autosize="{ minRows: 4, maxRows: 10 }"
+              :placeholder="t('nodePool.protectCidrsPlaceholder')"
+            />
+          </n-form-item>
+          <n-form-item>
+            <n-button type="primary" :loading="savingTunSettings" @click="handleSaveTunSettings">
+              {{ t('nodePool.saveTunSettings') }}
+            </n-button>
+          </n-form-item>
+        </n-form>
+      </n-space>
+    </n-card>
+
     <div class="summary-strip">
       <div class="summary-item">
         <div class="summary-label">{{ t('nodePool.status.active') }}</div>
@@ -157,19 +204,45 @@
     <section class="section-block">
       <n-space justify="space-between" align="center" wrap>
         <h3>{{ t('nodePool.status.staging') }} ({{ stagingNodes.length }})</h3>
+        <n-space align="center" :size="8" wrap>
+          <span v-if="selectedStagingIds.length" class="node-pool-meta">
+            {{ t('nodePool.selectedCount', { count: selectedStagingIds.length }) }}
+          </span>
+          <n-button
+            v-if="stagingNodes.length"
+            size="small"
+            type="success"
+            :disabled="!selectedStagingIds.length"
+            :loading="bulkPromotingGroup === 'staging'"
+            @click="handleBulkPromote('staging')"
+          >
+            {{ t('nodePool.bulkPromote') }}
+          </n-button>
+          <n-button v-if="selectedStagingIds.length" size="small" secondary @click="clearSelection('staging')">
+            {{ t('common.reset') }}
+          </n-button>
+        </n-space>
       </n-space>
       <template v-if="stagingNodes.length">
         <n-data-table
           v-if="!isCompact"
           :columns="stagingColumns"
           :data="stagingNodes"
+          :row-key="rowKey"
+          :checked-row-keys="selectedStagingIds"
           :loading="loading"
           :pagination="{ pageSize: 10 }"
+          @update:checked-row-keys="(keys) => handleCheckedRowKeysUpdate('staging', keys)"
         />
         <div v-else class="node-card-list">
           <div v-for="node in stagingNodes" :key="node.id" class="node-card">
             <div class="node-card-header">
-              <strong>{{ node.remark || node.address }}</strong>
+              <n-checkbox
+                :checked="isSelected('staging', node.id)"
+                @update:checked="(checked) => setCardSelection('staging', node.id, checked)"
+              >
+                {{ node.remark || node.address }}
+              </n-checkbox>
               <n-tag size="small" :type="statusTagType(node.status)">
                 {{ statusLabel(node.status) }}
               </n-tag>
@@ -200,28 +273,54 @@
     <section class="section-block">
       <n-space justify="space-between" align="center" wrap>
         <h3>{{ t('nodePool.status.quarantine') }} ({{ quarantineNodes.length }})</h3>
-        <n-button
-          v-if="quarantineNodes.length"
-          size="small"
-          type="warning"
-          :loading="bulkRemoving"
-          @click="handleBulkRemoveQuarantine"
-        >
-          {{ t('nodePool.bulkRemoveUnstable') }}
-        </n-button>
+        <n-space align="center" :size="8" wrap>
+          <span v-if="selectedQuarantineIds.length" class="node-pool-meta">
+            {{ t('nodePool.selectedCount', { count: selectedQuarantineIds.length }) }}
+          </span>
+          <n-button
+            v-if="quarantineNodes.length"
+            size="small"
+            type="success"
+            :disabled="!selectedQuarantineIds.length"
+            :loading="bulkPromotingGroup === 'quarantine'"
+            @click="handleBulkPromote('quarantine')"
+          >
+            {{ t('nodePool.bulkPromote') }}
+          </n-button>
+          <n-button v-if="selectedQuarantineIds.length" size="small" secondary @click="clearSelection('quarantine')">
+            {{ t('common.reset') }}
+          </n-button>
+          <n-button
+            v-if="quarantineNodes.length"
+            size="small"
+            type="warning"
+            :loading="bulkRemoving"
+            @click="handleBulkRemoveQuarantine"
+          >
+            {{ t('nodePool.bulkRemoveUnstable') }}
+          </n-button>
+        </n-space>
       </n-space>
       <template v-if="quarantineNodes.length">
         <n-data-table
           v-if="!isCompact"
           :columns="quarantineColumns"
           :data="quarantineNodes"
+          :row-key="rowKey"
+          :checked-row-keys="selectedQuarantineIds"
           :loading="loading"
           :pagination="{ pageSize: 10 }"
+          @update:checked-row-keys="(keys) => handleCheckedRowKeysUpdate('quarantine', keys)"
         />
         <div v-else class="node-card-list">
           <div v-for="node in quarantineNodes" :key="node.id" class="node-card">
             <div class="node-card-header">
-              <strong>{{ node.remark || node.address }}</strong>
+              <n-checkbox
+                :checked="isSelected('quarantine', node.id)"
+                @update:checked="(checked) => setCardSelection('quarantine', node.id, checked)"
+              >
+                {{ node.remark || node.address }}
+              </n-checkbox>
               <n-tag size="small" :type="statusTagType(node.status)">
                 {{ statusLabel(node.status) }}
               </n-tag>
@@ -360,6 +459,7 @@ import {
   NAlert,
   NButton,
   NCard,
+  NCheckbox,
   NCollapse,
   NCollapseItem,
   NDataTable,
@@ -371,11 +471,13 @@ import {
   NList,
   NListItem,
   NPopconfirm,
+  NSelect,
   NSpace,
   NSwitch,
   NTag,
   useMessage,
-  type DataTableColumns
+  type DataTableColumns,
+  type DataTableRowKey
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { nodePoolAPI, tunAPI } from '@/api/client'
@@ -388,6 +490,9 @@ import type {
   NodePoolSummary,
   NodeRecord,
   NodeStatus,
+  TunEditableSettings,
+  TunRouteMode,
+  TunSelectionPolicy,
   TransitionReason,
   TunStatusResponse,
   ValidationConfig
@@ -400,8 +505,14 @@ const loading = ref(false)
 const tunUpdating = ref(false)
 const installingTunBootstrap = ref(false)
 const savingConfig = ref(false)
+const savingTunSettings = ref(false)
 const bulkRemoving = ref(false)
+const bulkPromotingGroup = ref<'staging' | 'quarantine' | null>(null)
 const isCompact = ref(typeof window !== 'undefined' ? window.innerWidth < 768 : false)
+const selectedStagingIds = ref<string[]>([])
+const selectedQuarantineIds = ref<string[]>([])
+const tunProtectDomainsText = ref('')
+const tunProtectCidrsText = ref('')
 
 const dashboard = ref<NodePoolDashboardResponse>({
   nodes: [],
@@ -457,12 +568,19 @@ const configForm = ref<ValidationConfig>({
   minBandwidthKbps: 0
 })
 
+const tunSettingsForm = ref<TunEditableSettings>({
+  selectionPolicy: 'fastest',
+  routeMode: 'strict_proxy',
+  protectDomains: [],
+  protectCidrs: []
+})
+
 const nodes = computed(() => dashboard.value.nodes || [])
 const summary = computed<NodePoolSummary>(() => dashboard.value.summary)
 const recentEvents = computed<NodeEvent[]>(() => dashboard.value.recentEvents || [])
-const activeNodes = computed(() => nodes.value.filter((node) => node.status === 'active'))
-const stagingNodes = computed(() => nodes.value.filter((node) => node.status === 'staging'))
-const quarantineNodes = computed(() => nodes.value.filter((node) => node.status === 'quarantine'))
+const activeNodes = computed(() => sortNodesByQuality(nodes.value.filter((node) => node.status === 'active')))
+const stagingNodes = computed(() => sortNodesByQuality(nodes.value.filter((node) => node.status === 'staging')))
+const quarantineNodes = computed(() => sortNodesByQuality(nodes.value.filter((node) => node.status === 'quarantine')))
 const candidateNodes = computed(() => nodes.value.filter((node) => node.status === 'candidate'))
 const removedNodes = computed(() => nodes.value.filter((node) => node.status === 'removed'))
 
@@ -510,6 +628,17 @@ const machineBannerBody = computed(() => {
   }
   return tunStatus.value.message || machineReasonLabel.value
 })
+
+const routeModeOptions = computed(() => [
+  { label: t('nodePool.routeModeOptions.strict_proxy'), value: 'strict_proxy' as TunRouteMode },
+  { label: t('nodePool.routeModeOptions.auto_tested'), value: 'auto_tested' as TunRouteMode }
+])
+
+const selectionPolicyOptions = computed(() => [
+  { label: t('nodePool.selectionPolicyOptions.fastest'), value: 'fastest' as TunSelectionPolicy },
+  { label: t('nodePool.selectionPolicyOptions.lowest_latency'), value: 'lowest_latency' as TunSelectionPolicy },
+  { label: t('nodePool.selectionPolicyOptions.lowest_fail_rate'), value: 'lowest_fail_rate' as TunSelectionPolicy }
+])
 
 function translateCode(prefix: string, code: string): string {
   const key = `${prefix}.${code}`
@@ -563,6 +692,43 @@ function delayLabel(node: NodeRecord) {
   return node.avgDelayMs > 0 ? `${node.avgDelayMs}ms` : t('nodePool.delayUnknown')
 }
 
+function failRateValue(node: NodeRecord) {
+  if (!node.totalPings) return Number.POSITIVE_INFINITY
+  return node.failedPings / node.totalPings
+}
+
+function delayValue(node: NodeRecord) {
+  return node.avgDelayMs > 0 ? node.avgDelayMs : Number.POSITIVE_INFINITY
+}
+
+function checkedAtValue(node: NodeRecord) {
+  const value = node.lastCheckedAt || node.statusUpdatedAt || node.addedAt
+  const timestamp = value ? new Date(value).getTime() : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function compareNodesByQuality(a: NodeRecord, b: NodeRecord) {
+  const failRateDiff = failRateValue(a) - failRateValue(b)
+  if (failRateDiff !== 0) return failRateDiff
+
+  const delayDiff = delayValue(a) - delayValue(b)
+  if (delayDiff !== 0) return delayDiff
+
+  if (a.consecutiveFails !== b.consecutiveFails) {
+    return a.consecutiveFails - b.consecutiveFails
+  }
+
+  if (a.totalPings !== b.totalPings) {
+    return b.totalPings - a.totalPings
+  }
+
+  return checkedAtValue(b) - checkedAtValue(a)
+}
+
+function sortNodesByQuality(nodes: NodeRecord[]) {
+  return [...nodes].sort(compareNodesByQuality)
+}
+
 function formatDateTime(value?: string) {
   if (!value) return ''
   const date = new Date(value)
@@ -574,8 +740,61 @@ function syncViewport() {
   isCompact.value = window.innerWidth < 768
 }
 
+function rowKey(row: NodeRecord) {
+  return row.id
+}
+
+function syncSelections() {
+  const stagingSet = new Set(stagingNodes.value.map((node) => node.id))
+  const quarantineSet = new Set(quarantineNodes.value.map((node) => node.id))
+  selectedStagingIds.value = selectedStagingIds.value.filter((id) => stagingSet.has(id))
+  selectedQuarantineIds.value = selectedQuarantineIds.value.filter((id) => quarantineSet.has(id))
+}
+
+function clearSelection(group: 'staging' | 'quarantine') {
+  if (group === 'staging') {
+    selectedStagingIds.value = []
+    return
+  }
+  selectedQuarantineIds.value = []
+}
+
+function handleCheckedRowKeysUpdate(group: 'staging' | 'quarantine', keys: DataTableRowKey[]) {
+  const ids = keys.map((key) => String(key))
+  if (group === 'staging') {
+    selectedStagingIds.value = ids
+    return
+  }
+  selectedQuarantineIds.value = ids
+}
+
+function isSelected(group: 'staging' | 'quarantine', id: string) {
+  return (group === 'staging' ? selectedStagingIds.value : selectedQuarantineIds.value).includes(id)
+}
+
+function setCardSelection(group: 'staging' | 'quarantine', id: string, checked: boolean) {
+  const next = new Set(group === 'staging' ? selectedStagingIds.value : selectedQuarantineIds.value)
+  if (checked) {
+    next.add(id)
+  } else {
+    next.delete(id)
+  }
+  if (group === 'staging') {
+    selectedStagingIds.value = Array.from(next)
+    return
+  }
+  selectedQuarantineIds.value = Array.from(next)
+}
+
 function createColumns(group: 'candidate' | 'staging' | 'active' | 'quarantine' | 'removed'): DataTableColumns<NodeRecord> {
   const columns: DataTableColumns<NodeRecord> = [
+    ...(group === 'staging' || group === 'quarantine'
+      ? [
+          {
+            type: 'selection'
+          } as const
+        ]
+      : []),
     {
       title: () => t('subscriptions.remark'),
       key: 'remark',
@@ -691,11 +910,39 @@ const removedColumns = computed(() => createColumns('removed'))
 async function fetchDashboard() {
   const data = await nodePoolAPI.list()
   dashboard.value = data
+  syncSelections()
 }
 
 async function fetchConfig() {
   const data = await nodePoolAPI.getConfig()
   configForm.value = { ...configForm.value, ...data }
+}
+
+function normalizeListInput(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function syncTunSettingsTextAreas() {
+  tunProtectDomainsText.value = (tunSettingsForm.value.protectDomains || []).join('\n')
+  tunProtectCidrsText.value = (tunSettingsForm.value.protectCidrs || []).join('\n')
+}
+
+async function fetchTunSettings() {
+  const data = await tunAPI.getSettings()
+  tunSettingsForm.value = {
+    selectionPolicy: data.selectionPolicy || 'fastest',
+    routeMode: data.routeMode || 'strict_proxy',
+    protectDomains: Array.isArray(data.protectDomains) ? data.protectDomains : [],
+    protectCidrs: Array.isArray(data.protectCidrs) ? data.protectCidrs : []
+  }
+  syncTunSettingsTextAreas()
 }
 
 async function fetchTunStatus() {
@@ -713,7 +960,7 @@ function applyTunStatus(status: TunStatusResponse) {
 async function refreshAll() {
   loading.value = true
   try {
-    await Promise.all([fetchDashboard(), fetchConfig(), fetchTunStatus()])
+    await Promise.all([fetchDashboard(), fetchConfig(), fetchTunSettings(), fetchTunStatus()])
   } catch (err: any) {
     message.error(err?.message || err?.error || t('common.error'))
   } finally {
@@ -799,6 +1046,23 @@ async function handleRemove(id: string) {
   }
 }
 
+async function handleBulkPromote(group: 'staging' | 'quarantine') {
+  const ids = group === 'staging' ? selectedStagingIds.value : selectedQuarantineIds.value
+  if (!ids.length) return
+
+  bulkPromotingGroup.value = group
+  try {
+    await nodePoolAPI.bulkPromote({ ids })
+    clearSelection(group)
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    bulkPromotingGroup.value = null
+  }
+}
+
 async function handleBulkRemoveQuarantine() {
   bulkRemoving.value = true
   try {
@@ -822,6 +1086,34 @@ async function handleSaveConfig() {
     message.error(err?.message || err?.error || t('common.error'))
   } finally {
     savingConfig.value = false
+  }
+}
+
+async function handleSaveTunSettings() {
+  savingTunSettings.value = true
+  try {
+    const saved = await tunAPI.updateSettings({
+      selectionPolicy: tunSettingsForm.value.selectionPolicy,
+      routeMode: tunSettingsForm.value.routeMode,
+      protectDomains: normalizeListInput(tunProtectDomainsText.value),
+      protectCidrs: normalizeListInput(tunProtectCidrsText.value)
+    })
+    tunSettingsForm.value = {
+      selectionPolicy: saved.selectionPolicy || 'fastest',
+      routeMode: saved.routeMode || 'strict_proxy',
+      protectDomains: Array.isArray(saved.protectDomains) ? saved.protectDomains : [],
+      protectCidrs: Array.isArray(saved.protectCidrs) ? saved.protectCidrs : []
+    }
+    syncTunSettingsTextAreas()
+    message.success(
+      tunStatus.value.running
+        ? t('nodePool.tunSettingsSavedRunning')
+        : t('nodePool.tunSettingsSaved')
+    )
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    savingTunSettings.value = false
   }
 }
 
@@ -849,6 +1141,10 @@ onBeforeUnmount(() => {
 
 .machine-strip {
   border-left: 4px solid var(--n-color-target, #18a058);
+}
+
+.tun-settings-card {
+  border-left: 4px solid var(--n-color-target, #2080f0);
 }
 
 .machine-actions {

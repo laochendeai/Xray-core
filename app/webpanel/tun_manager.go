@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -18,7 +20,9 @@ import (
 )
 
 var (
-	defaultTunCIDRs = []string{
+	defaultTunSelectionPolicy = TunSelectionPolicyFastest
+	defaultTunRouteMode       = TunRouteModeStrictProxy
+	defaultTunCIDRs           = []string{
 		"127.0.0.0/8",
 		"10.0.0.0/8",
 		"172.16.0.0/12",
@@ -42,6 +46,29 @@ var (
 	}
 )
 
+type TunSelectionPolicy string
+type TunRouteMode string
+
+const (
+	TunSelectionPolicyFastest        TunSelectionPolicy = "fastest"
+	TunSelectionPolicyLowestLatency  TunSelectionPolicy = "lowest_latency"
+	TunSelectionPolicyLowestFailRate TunSelectionPolicy = "lowest_fail_rate"
+)
+
+const (
+	TunRouteModeStrictProxy TunRouteMode = "strict_proxy"
+	TunRouteModeAutoTested  TunRouteMode = "auto_tested"
+)
+
+const (
+	tunLowestFailRateSubsetSize = 3
+	tunDirectProbeTimeout       = 1200 * time.Millisecond
+	tunDirectProbeCacheTTL      = 6 * time.Hour
+	tunDirectProbeConcurrency   = 12
+	tunDirectProbeCacheVersion  = 1
+	tunDirectProbeCacheFileName = "route-probe-cache.json"
+)
+
 type TunManager struct {
 	configPath string
 	xrayBin    string
@@ -58,8 +85,33 @@ type TunFeatureSettings struct {
 	RemoteDNS         []string `json:"remoteDns"`
 	UseSudo           *bool    `json:"useSudo"`
 	AllowRemote       bool     `json:"allowRemote"`
+	SelectionPolicy   string   `json:"selectionPolicy"`
+	RouteMode         string   `json:"routeMode"`
 	ProtectCIDRs      []string `json:"protectCidrs"`
 	ProtectDomains    []string `json:"protectDomains"`
+}
+
+type TunEditableSettings struct {
+	SelectionPolicy string   `json:"selectionPolicy"`
+	RouteMode       string   `json:"routeMode"`
+	ProtectCIDRs    []string `json:"protectCidrs"`
+	ProtectDomains  []string `json:"protectDomains"`
+}
+
+type tunDirectProbeCache struct {
+	Version int                                 `json:"version"`
+	Entries map[string]tunDirectProbeCacheEntry `json:"entries"`
+}
+
+type tunDirectProbeCacheEntry struct {
+	Decision  bool      `json:"decision"`
+	CheckedAt time.Time `json:"checkedAt"`
+}
+
+type tunDirectProbeRequest struct {
+	Key   string
+	Host  string
+	Ports []int
 }
 
 type tunConfigEnvelope struct {
@@ -463,11 +515,121 @@ func (m *TunManager) loadSettings() (*TunFeatureSettings, error) {
 		useSudo = *settings.UseSudo
 	}
 	settings.UseSudo = &useSudo
+	settings.SelectionPolicy = string(normalizeTunSelectionPolicy(settings.SelectionPolicy))
+	settings.RouteMode = string(normalizeTunRouteMode(settings.RouteMode))
 
 	settings.ProtectCIDRs = uniqStrings(append(append([]string{}, defaultTunCIDRs...), settings.ProtectCIDRs...))
-	settings.ProtectDomains = uniqStrings(append(append([]string{}, defaultTunDomains...), settings.ProtectDomains...))
+	settings.ProtectDomains = normalizeTunDomainRules(append(append([]string{}, defaultTunDomains...), settings.ProtectDomains...))
 
 	return settings, nil
+}
+
+func (m *TunManager) EditableSettings() (*TunEditableSettings, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.loadEditableSettingsLocked()
+}
+
+func (m *TunManager) UpdateEditableSettings(next TunEditableSettings) (*TunEditableSettings, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	config, err := m.readConfigMapLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	webpanel, _ := config["webpanel"].(map[string]interface{})
+	if webpanel == nil {
+		webpanel = map[string]interface{}{}
+	}
+
+	tun, _ := webpanel["tun"].(map[string]interface{})
+	if tun == nil {
+		tun = map[string]interface{}{}
+	}
+
+	selectionPolicy := string(normalizeTunSelectionPolicy(next.SelectionPolicy))
+	tun["selectionPolicy"] = selectionPolicy
+
+	routeMode := string(normalizeTunRouteMode(next.RouteMode))
+	tun["routeMode"] = routeMode
+
+	protectDomains := normalizeTunDomainRules(next.ProtectDomains)
+	if len(protectDomains) > 0 {
+		tun["protectDomains"] = protectDomains
+	} else {
+		delete(tun, "protectDomains")
+	}
+
+	protectCIDRs := uniqStrings(next.ProtectCIDRs)
+	if len(protectCIDRs) > 0 {
+		tun["protectCidrs"] = protectCIDRs
+	} else {
+		delete(tun, "protectCidrs")
+	}
+
+	webpanel["tun"] = tun
+	config["webpanel"] = webpanel
+
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return nil, fmt.Errorf("encode updated TUN settings: %w", err)
+	}
+
+	if err := NewConfigFileManager(m.configPath).WriteConfig(encoded); err != nil {
+		return nil, err
+	}
+
+	return m.loadEditableSettingsLocked()
+}
+
+func (m *TunManager) loadEditableSettingsLocked() (*TunEditableSettings, error) {
+	config, err := m.readConfigMapLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	webpanel, _ := config["webpanel"].(map[string]interface{})
+	tun, _ := webpanel["tun"].(map[string]interface{})
+
+	settings := &TunEditableSettings{
+		SelectionPolicy: string(defaultTunSelectionPolicy),
+		RouteMode:       string(defaultTunRouteMode),
+	}
+	if tun == nil {
+		return settings, nil
+	}
+
+	if value, ok := tun["selectionPolicy"].(string); ok {
+		settings.SelectionPolicy = string(normalizeTunSelectionPolicy(value))
+	}
+	if value, ok := tun["routeMode"].(string); ok {
+		settings.RouteMode = string(normalizeTunRouteMode(value))
+	}
+	settings.ProtectDomains = normalizeTunDomainRules(stringSliceFromAny(tun["protectDomains"]))
+	settings.ProtectCIDRs = uniqStrings(stringSliceFromAny(tun["protectCidrs"]))
+
+	return settings, nil
+}
+
+func (m *TunManager) readConfigMapLocked() (map[string]interface{}, error) {
+	if m.configPath == "" {
+		return nil, fmt.Errorf("config path is not configured for the web panel")
+	}
+
+	raw, err := os.ReadFile(m.configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+
+	var config map[string]interface{}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return nil, fmt.Errorf("parse config file: %w", err)
+	}
+
+	return config, nil
 }
 
 func (m *TunManager) inspectLocked(settings *TunFeatureSettings) *TunStatus {
@@ -487,6 +649,9 @@ func (m *TunManager) inspectLocked(settings *TunFeatureSettings) *TunStatus {
 		RemoteDNS:         append([]string{}, settings.RemoteDNS...),
 		ConfigPath:        m.configPath,
 		XrayBinary:        settings.BinaryPath,
+	}
+	if normalizeTunRouteMode(settings.RouteMode) == TunRouteModeAutoTested {
+		status.Diagnostics = append(status.Diagnostics, "Auto-tested split routing will probe base direct rules before enabling transparent mode; the first start or stale cache refresh can take longer.")
 	}
 
 	if _, err := os.Stat(settings.HelperPath); err == nil {
@@ -555,6 +720,10 @@ func (m *TunManager) inspectLocked(settings *TunFeatureSettings) *TunStatus {
 }
 
 func (m *TunManager) generateRuntimeConfigLocked(settings *TunFeatureSettings, activeNodes []NodeRecord) error {
+	if err := os.MkdirAll(settings.StateDir, 0755); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+
 	raw, err := os.ReadFile(m.configPath)
 	if err != nil {
 		return fmt.Errorf("read base config: %w", err)
@@ -565,9 +734,6 @@ func (m *TunManager) generateRuntimeConfigLocked(settings *TunFeatureSettings, a
 		return err
 	}
 
-	if err := os.MkdirAll(settings.StateDir, 0755); err != nil {
-		return fmt.Errorf("create state dir: %w", err)
-	}
 	if err := os.WriteFile(settings.RuntimeConfigPath, runtimeConfig, 0644); err != nil {
 		return fmt.Errorf("write runtime config: %w", err)
 	}
@@ -616,6 +782,10 @@ func (m *TunManager) runHelperLocked(settings *TunFeatureSettings, action string
 }
 
 func buildTunRuntimeConfig(raw []byte, settings *TunFeatureSettings, activeNodes []NodeRecord) ([]byte, error) {
+	return buildTunRuntimeConfigWithDirectProbeResults(raw, settings, activeNodes, nil)
+}
+
+func buildTunRuntimeConfigWithDirectProbeResults(raw []byte, settings *TunFeatureSettings, activeNodes []NodeRecord, directProbeResults map[string]bool) ([]byte, error) {
 	if len(activeNodes) == 0 {
 		return nil, fmt.Errorf("no active nodes available for transparent mode")
 	}
@@ -634,10 +804,9 @@ func buildTunRuntimeConfig(raw []byte, settings *TunFeatureSettings, activeNodes
 	if err != nil {
 		return nil, err
 	}
+	balancerConfig := buildTunBalancerConfig(settings, activeNodes)
 
 	delete(config, "api")
-	delete(config, "burstObservatory")
-	delete(config, "observatory")
 	delete(config, "webpanel")
 
 	config["inbounds"] = []interface{}{
@@ -666,8 +835,9 @@ func buildTunRuntimeConfig(raw []byte, settings *TunFeatureSettings, activeNodes
 		routing = map[string]interface{}{}
 	}
 	existingRules, _ := routing["rules"].([]interface{})
+	resolvedProbeResults := resolveTunDirectProbeResults(settings, existingRules, directProbeResults)
 	priorityRules, _ := splitTunRoutingRules(existingRules)
-	priorityRules = filterTunPriorityRules(priorityRules, settings)
+	priorityRules = filterTunPriorityRules(priorityRules, settings, resolvedProbeResults)
 	prependRules := make([]interface{}, 0, 6)
 	prependRules = append(prependRules, map[string]interface{}{
 		"type":        "field",
@@ -737,14 +907,14 @@ func buildTunRuntimeConfig(raw []byte, settings *TunFeatureSettings, activeNodes
 
 	routing["balancers"] = []interface{}{
 		map[string]interface{}{
-			"tag":      "node-pool-active",
-			"selector": []string{"pool-active-"},
-			"strategy": map[string]interface{}{
-				"type": "roundrobin",
-			},
+			"tag":         "node-pool-active",
+			"selector":    balancerConfig.Selectors,
+			"strategy":    balancerConfig.Strategy,
+			"fallbackTag": balancerConfig.FallbackTag,
 		},
 	}
 	config["routing"] = routing
+	injectTunBurstObservatory(config, balancerConfig.Selectors)
 
 	outbounds = filterOutboundsByTag(outbounds, "dns-out")
 	outbounds = ensureTunUtilityOutbounds(outbounds)
@@ -765,6 +935,120 @@ func buildTunRuntimeConfig(raw []byte, settings *TunFeatureSettings, activeNodes
 	return append(bytes.TrimRight(formatted, "\n"), '\n'), nil
 }
 
+type tunBalancerConfig struct {
+	Selectors   []string
+	Strategy    map[string]interface{}
+	FallbackTag string
+}
+
+func buildTunBalancerConfig(settings *TunFeatureSettings, activeNodes []NodeRecord) tunBalancerConfig {
+	policy := defaultTunSelectionPolicy
+	if settings != nil {
+		policy = normalizeTunSelectionPolicy(settings.SelectionPolicy)
+	}
+
+	allSelectors := buildTunOutboundSelectors(activeNodes)
+	if len(allSelectors) == 0 {
+		return tunBalancerConfig{
+			Selectors: allSelectors,
+			Strategy: map[string]interface{}{
+				"type": "roundrobin",
+			},
+		}
+	}
+
+	switch policy {
+	case TunSelectionPolicyLowestLatency:
+		return tunBalancerConfig{
+			Selectors:   allSelectors,
+			Strategy:    map[string]interface{}{"type": "leastping"},
+			FallbackTag: buildTunOutboundTag(bestNodeByLowestLatency(activeNodes).ID),
+		}
+	case TunSelectionPolicyLowestFailRate:
+		candidates := pickLowestFailRateNodes(activeNodes, tunLowestFailRateSubsetSize)
+		selectors := buildTunOutboundSelectors(candidates)
+		if len(selectors) == 0 {
+			selectors = allSelectors
+		}
+		return tunBalancerConfig{
+			Selectors:   selectors,
+			Strategy:    map[string]interface{}{"type": "leastping"},
+			FallbackTag: buildTunOutboundTag(bestNodeByLowestFailRate(activeNodes).ID),
+		}
+	default:
+		return tunBalancerConfig{
+			Selectors:   allSelectors,
+			Strategy:    map[string]interface{}{"type": "leastload"},
+			FallbackTag: buildTunOutboundTag(bestNodeByFastestPriority(activeNodes).ID),
+		}
+	}
+}
+
+func injectTunBurstObservatory(config map[string]interface{}, selectors []string) {
+	if len(selectors) == 0 {
+		return
+	}
+
+	burstConfig := map[string]interface{}{
+		"subjectSelector": selectors,
+		"pingConfig": map[string]interface{}{
+			"destination": "https://www.gstatic.com/generate_204",
+			"interval":    "15s",
+			"sampling":    4,
+			"timeout":     "5s",
+			"httpMethod":  "HEAD",
+		},
+	}
+
+	if existingBurst, ok := config["burstObservatory"].(map[string]interface{}); ok {
+		if pingConfig, ok := existingBurst["pingConfig"].(map[string]interface{}); ok {
+			mergedPingConfig := map[string]interface{}{}
+			for key, value := range pingConfig {
+				mergedPingConfig[key] = value
+			}
+			if _, ok := mergedPingConfig["destination"]; !ok || strings.TrimSpace(fmt.Sprint(mergedPingConfig["destination"])) == "" {
+				mergedPingConfig["destination"] = "https://www.gstatic.com/generate_204"
+			}
+			if _, ok := mergedPingConfig["interval"]; !ok || strings.TrimSpace(fmt.Sprint(mergedPingConfig["interval"])) == "" {
+				mergedPingConfig["interval"] = "15s"
+			}
+			if _, ok := mergedPingConfig["sampling"]; !ok {
+				mergedPingConfig["sampling"] = 4
+			}
+			if _, ok := mergedPingConfig["timeout"]; !ok || strings.TrimSpace(fmt.Sprint(mergedPingConfig["timeout"])) == "" {
+				mergedPingConfig["timeout"] = "5s"
+			}
+			if _, ok := mergedPingConfig["httpMethod"]; !ok || strings.TrimSpace(fmt.Sprint(mergedPingConfig["httpMethod"])) == "" {
+				mergedPingConfig["httpMethod"] = "HEAD"
+			}
+			burstConfig["pingConfig"] = mergedPingConfig
+		}
+	} else if observatoryConfig, ok := config["observatory"].(map[string]interface{}); ok {
+		pingConfig := burstConfig["pingConfig"].(map[string]interface{})
+		if value, ok := observatoryConfig["probeURL"]; ok && strings.TrimSpace(fmt.Sprint(value)) != "" {
+			pingConfig["destination"] = value
+		}
+		if value, ok := observatoryConfig["probeInterval"]; ok && strings.TrimSpace(fmt.Sprint(value)) != "" {
+			pingConfig["interval"] = value
+		}
+	}
+
+	config["burstObservatory"] = burstConfig
+	delete(config, "observatory")
+}
+
+func buildTunOutboundSelectors(activeNodes []NodeRecord) []string {
+	selectors := make([]string, 0, len(activeNodes))
+	for _, node := range activeNodes {
+		selectors = append(selectors, buildTunOutboundTag(node.ID))
+	}
+	return selectors
+}
+
+func buildTunOutboundTag(nodeID string) string {
+	return "pool-active-" + nodeID
+}
+
 func buildActivePoolOutbounds(activeNodes []NodeRecord) ([]interface{}, error) {
 	result := make([]interface{}, 0, len(activeNodes))
 	for _, node := range activeNodes {
@@ -772,7 +1056,7 @@ func buildActivePoolOutbounds(activeNodes []NodeRecord) ([]interface{}, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse active node %s: %w", node.ID, err)
 		}
-		outboundJSON, err := BuildOutboundJSON(link, "pool-active-"+node.ID)
+		outboundJSON, err := BuildOutboundJSON(link, buildTunOutboundTag(node.ID))
 		if err != nil {
 			return nil, fmt.Errorf("build active node %s: %w", node.ID, err)
 		}
@@ -825,6 +1109,186 @@ func buildTunDNSConfig(settings *TunFeatureSettings) map[string]interface{} {
 		"queryStrategy":          "UseIP",
 		"disableFallbackIfMatch": hasGeosite,
 	}
+}
+
+func normalizeTunSelectionPolicy(value string) TunSelectionPolicy {
+	switch TunSelectionPolicy(strings.ToLower(strings.TrimSpace(value))) {
+	case TunSelectionPolicyLowestLatency:
+		return TunSelectionPolicyLowestLatency
+	case TunSelectionPolicyLowestFailRate:
+		return TunSelectionPolicyLowestFailRate
+	default:
+		return TunSelectionPolicyFastest
+	}
+}
+
+func normalizeTunRouteMode(value string) TunRouteMode {
+	switch TunRouteMode(strings.ToLower(strings.TrimSpace(value))) {
+	case TunRouteModeAutoTested:
+		return TunRouteModeAutoTested
+	default:
+		return TunRouteModeStrictProxy
+	}
+}
+
+func normalizeTunDomainRules(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		next := normalizeTunDomainRule(value)
+		if next == "" {
+			continue
+		}
+		normalized = append(normalized, next)
+	}
+	return uniqStrings(normalized)
+}
+
+func normalizeTunDomainRule(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+
+	switch {
+	case strings.HasPrefix(trimmed, "*."):
+		host := strings.Trim(strings.TrimPrefix(trimmed, "*."), ".")
+		if host == "" {
+			return ""
+		}
+		return "domain:" + host
+	case strings.HasPrefix(trimmed, "."):
+		host := strings.Trim(strings.TrimPrefix(trimmed, "."), ".")
+		if host == "" {
+			return ""
+		}
+		return "domain:" + host
+	default:
+		return trimmed
+	}
+}
+
+func stringSliceFromAny(raw interface{}) []string {
+	switch typed := raw.(type) {
+	case []string:
+		return append([]string{}, typed...)
+	case []interface{}:
+		values := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, ok := item.(string); ok {
+				values = append(values, text)
+			}
+		}
+		return values
+	default:
+		return nil
+	}
+}
+
+func tunNodeFailRate(node NodeRecord) float64 {
+	if node.TotalPings <= 0 {
+		return 1
+	}
+	return float64(node.FailedPings) / float64(node.TotalPings)
+}
+
+func tunNodeDelay(node NodeRecord) int64 {
+	if node.AvgDelayMs <= 0 {
+		return int64(^uint64(0) >> 1)
+	}
+	return node.AvgDelayMs
+}
+
+func tunNodeCheckedAt(node NodeRecord) int64 {
+	if node.LastCheckedAt != nil {
+		return node.LastCheckedAt.UnixNano()
+	}
+	if node.StatusUpdatedAt != nil {
+		return node.StatusUpdatedAt.UnixNano()
+	}
+	return node.AddedAt.UnixNano()
+}
+
+func compareNodesByLowestLatency(a, b NodeRecord) bool {
+	if tunNodeDelay(a) != tunNodeDelay(b) {
+		return tunNodeDelay(a) < tunNodeDelay(b)
+	}
+	if tunNodeFailRate(a) != tunNodeFailRate(b) {
+		return tunNodeFailRate(a) < tunNodeFailRate(b)
+	}
+	if a.ConsecutiveFails != b.ConsecutiveFails {
+		return a.ConsecutiveFails < b.ConsecutiveFails
+	}
+	if a.TotalPings != b.TotalPings {
+		return a.TotalPings > b.TotalPings
+	}
+	return tunNodeCheckedAt(a) > tunNodeCheckedAt(b)
+}
+
+func compareNodesByLowestFailRate(a, b NodeRecord) bool {
+	if tunNodeFailRate(a) != tunNodeFailRate(b) {
+		return tunNodeFailRate(a) < tunNodeFailRate(b)
+	}
+	if a.ConsecutiveFails != b.ConsecutiveFails {
+		return a.ConsecutiveFails < b.ConsecutiveFails
+	}
+	if tunNodeDelay(a) != tunNodeDelay(b) {
+		return tunNodeDelay(a) < tunNodeDelay(b)
+	}
+	if a.TotalPings != b.TotalPings {
+		return a.TotalPings > b.TotalPings
+	}
+	return tunNodeCheckedAt(a) > tunNodeCheckedAt(b)
+}
+
+func compareNodesByFastestPriority(a, b NodeRecord) bool {
+	if tunNodeDelay(a) != tunNodeDelay(b) {
+		return tunNodeDelay(a) < tunNodeDelay(b)
+	}
+	if tunNodeFailRate(a) != tunNodeFailRate(b) {
+		return tunNodeFailRate(a) < tunNodeFailRate(b)
+	}
+	if a.ConsecutiveFails != b.ConsecutiveFails {
+		return a.ConsecutiveFails < b.ConsecutiveFails
+	}
+	if a.TotalPings != b.TotalPings {
+		return a.TotalPings > b.TotalPings
+	}
+	return tunNodeCheckedAt(a) > tunNodeCheckedAt(b)
+}
+
+func bestNodeByLowestLatency(nodes []NodeRecord) NodeRecord {
+	sorted := append([]NodeRecord(nil), nodes...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return compareNodesByLowestLatency(sorted[i], sorted[j])
+	})
+	return sorted[0]
+}
+
+func bestNodeByLowestFailRate(nodes []NodeRecord) NodeRecord {
+	sorted := append([]NodeRecord(nil), nodes...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return compareNodesByLowestFailRate(sorted[i], sorted[j])
+	})
+	return sorted[0]
+}
+
+func bestNodeByFastestPriority(nodes []NodeRecord) NodeRecord {
+	sorted := append([]NodeRecord(nil), nodes...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return compareNodesByFastestPriority(sorted[i], sorted[j])
+	})
+	return sorted[0]
+}
+
+func pickLowestFailRateNodes(nodes []NodeRecord, limit int) []NodeRecord {
+	sorted := append([]NodeRecord(nil), nodes...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return compareNodesByLowestFailRate(sorted[i], sorted[j])
+	})
+	if limit <= 0 || limit >= len(sorted) {
+		return sorted
+	}
+	return sorted[:limit]
 }
 
 func normalizeTunResolverAddress(address string) string {
@@ -977,8 +1441,12 @@ func splitTunRoutingRules(rules []interface{}) ([]interface{}, []interface{}) {
 	return priorityRules, fallbackRules
 }
 
-func filterTunPriorityRules(rules []interface{}, settings *TunFeatureSettings) []interface{} {
+func filterTunPriorityRules(rules []interface{}, settings *TunFeatureSettings, directProbeResults map[string]bool) []interface{} {
 	filtered := make([]interface{}, 0, len(rules))
+	routeMode := normalizeTunRouteMode("")
+	if settings != nil {
+		routeMode = normalizeTunRouteMode(settings.RouteMode)
+	}
 	for _, rule := range rules {
 		ruleMap, ok := rule.(map[string]interface{})
 		if !ok {
@@ -986,7 +1454,7 @@ func filterTunPriorityRules(rules []interface{}, settings *TunFeatureSettings) [
 			continue
 		}
 
-		nextRule, keep := filterTunDirectRule(ruleMap, settings)
+		nextRule, keep := filterTunDirectRule(ruleMap, settings, routeMode, directProbeResults)
 		if keep {
 			filtered = append(filtered, nextRule)
 		}
@@ -994,7 +1462,7 @@ func filterTunPriorityRules(rules []interface{}, settings *TunFeatureSettings) [
 	return filtered
 }
 
-func filterTunDirectRule(rule map[string]interface{}, settings *TunFeatureSettings) (map[string]interface{}, bool) {
+func filterTunDirectRule(rule map[string]interface{}, settings *TunFeatureSettings, routeMode TunRouteMode, directProbeResults map[string]bool) (map[string]interface{}, bool) {
 	if len(rule) == 0 {
 		return rule, true
 	}
@@ -1011,9 +1479,14 @@ func filterTunDirectRule(rule map[string]interface{}, settings *TunFeatureSettin
 		filteredRule[key] = value
 	}
 
+	probePorts := tunDirectProbePorts(rule)
+
 	if rawDomains, ok := rule["domain"]; ok {
-		domains := filterTunStringList(rawDomains, func(value string) bool {
-			return isProtectedTunDomainRule(value, settings)
+		domains := normalizeTunDomainRules(filterTunStringList(rawDomains, func(string) bool {
+			return true
+		}))
+		domains = filterTunStringSlice(domains, func(value string) bool {
+			return shouldKeepTunDirectDomainRule(value, settings, routeMode, directProbeResults, probePorts)
 		})
 		if len(domains) > 0 {
 			filteredRule["domain"] = domains
@@ -1024,7 +1497,7 @@ func filterTunDirectRule(rule map[string]interface{}, settings *TunFeatureSettin
 
 	if rawIPs, ok := rule["ip"]; ok {
 		ips := filterTunStringList(rawIPs, func(value string) bool {
-			return isProtectedTunCIDRRule(value, settings)
+			return shouldKeepTunDirectIPRule(value, settings, routeMode, directProbeResults, probePorts)
 		})
 		if len(ips) > 0 {
 			filteredRule["ip"] = ips
@@ -1040,6 +1513,36 @@ func filterTunDirectRule(rule map[string]interface{}, settings *TunFeatureSettin
 	}
 
 	return filteredRule, true
+}
+
+func shouldKeepTunDirectDomainRule(value string, settings *TunFeatureSettings, routeMode TunRouteMode, directProbeResults map[string]bool, probePorts []int) bool {
+	if isProtectedTunDomainRule(value, settings) {
+		return true
+	}
+	if routeMode != TunRouteModeAutoTested {
+		return false
+	}
+
+	request, ok := buildTunDirectProbeRequestForDomain(value, probePorts)
+	if !ok {
+		return false
+	}
+	return directProbeResults[request.Key]
+}
+
+func shouldKeepTunDirectIPRule(value string, settings *TunFeatureSettings, routeMode TunRouteMode, directProbeResults map[string]bool, probePorts []int) bool {
+	if isProtectedTunCIDRRule(value, settings) {
+		return true
+	}
+	if routeMode != TunRouteModeAutoTested {
+		return false
+	}
+
+	request, ok := buildTunDirectProbeRequestForIP(value, probePorts)
+	if !ok {
+		return false
+	}
+	return directProbeResults[request.Key]
 }
 
 func isGenericTunFallbackRule(rule map[string]interface{}) bool {
@@ -1059,6 +1562,334 @@ func isGenericTunFallbackRule(rule map[string]interface{}) bool {
 	_, hasOutbound := rule["outboundTag"]
 	_, hasBalancer := rule["balancerTag"]
 	return hasOutbound || hasBalancer
+}
+
+func resolveTunDirectProbeResults(settings *TunFeatureSettings, rules []interface{}, overrides map[string]bool) map[string]bool {
+	results := make(map[string]bool)
+	for key, value := range overrides {
+		results[key] = value
+	}
+
+	routeMode := normalizeTunRouteMode("")
+	if settings != nil {
+		routeMode = normalizeTunRouteMode(settings.RouteMode)
+	}
+	if len(overrides) > 0 || routeMode != TunRouteModeAutoTested {
+		return results
+	}
+
+	requests := collectTunDirectProbeRequests(rules, settings)
+	if len(requests) == 0 {
+		return results
+	}
+
+	cache := loadTunDirectProbeCache(settings)
+	now := time.Now()
+	pending := make([]tunDirectProbeRequest, 0, len(requests))
+
+	for _, request := range requests {
+		entry, ok := cache.Entries[request.Key]
+		if ok && !entry.CheckedAt.IsZero() && now.Sub(entry.CheckedAt) <= tunDirectProbeCacheTTL {
+			results[request.Key] = entry.Decision
+			continue
+		}
+		pending = append(pending, request)
+	}
+
+	for key, decision := range runTunDirectProbeRequests(pending) {
+		results[key] = decision
+		cache.Entries[key] = tunDirectProbeCacheEntry{
+			Decision:  decision,
+			CheckedAt: now,
+		}
+	}
+
+	saveTunDirectProbeCache(settings, cache)
+	return results
+}
+
+func collectTunDirectProbeRequests(rules []interface{}, settings *TunFeatureSettings) []tunDirectProbeRequest {
+	routeMode := normalizeTunRouteMode("")
+	if settings != nil {
+		routeMode = normalizeTunRouteMode(settings.RouteMode)
+	}
+	if routeMode != TunRouteModeAutoTested {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	requests := make([]tunDirectProbeRequest, 0)
+	for _, rawRule := range rules {
+		rule, ok := rawRule.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		outboundTag, _ := rule["outboundTag"].(string)
+		if outboundTag != "direct" {
+			continue
+		}
+		if _, hasInboundTag := rule["inboundTag"]; hasInboundTag {
+			continue
+		}
+
+		probePorts := tunDirectProbePorts(rule)
+
+		if rawDomains, ok := rule["domain"]; ok {
+			for _, value := range filterTunStringSlice(normalizeTunDomainRules(filterTunStringList(rawDomains, func(string) bool {
+				return true
+			})), func(value string) bool {
+				return !isProtectedTunDomainRule(value, settings)
+			}) {
+				request, ok := buildTunDirectProbeRequestForDomain(value, probePorts)
+				if !ok {
+					continue
+				}
+				if _, exists := seen[request.Key]; exists {
+					continue
+				}
+				seen[request.Key] = struct{}{}
+				requests = append(requests, request)
+			}
+		}
+
+		if rawIPs, ok := rule["ip"]; ok {
+			for _, value := range filterTunStringList(rawIPs, func(value string) bool {
+				return !isProtectedTunCIDRRule(value, settings)
+			}) {
+				request, ok := buildTunDirectProbeRequestForIP(value, probePorts)
+				if !ok {
+					continue
+				}
+				if _, exists := seen[request.Key]; exists {
+					continue
+				}
+				seen[request.Key] = struct{}{}
+				requests = append(requests, request)
+			}
+		}
+	}
+
+	return requests
+}
+
+func tunDirectProbePorts(rule map[string]interface{}) []int {
+	if len(rule) == 0 {
+		return []int{443, 80}
+	}
+
+	if network, ok := rule["network"].(string); ok {
+		normalized := strings.ToLower(strings.TrimSpace(network))
+		if normalized != "" && !strings.Contains(normalized, "tcp") {
+			return nil
+		}
+	}
+
+	ports := make([]int, 0, 3)
+	addPort := func(port int) {
+		if port < 1 || port > 65535 {
+			return
+		}
+		for _, existing := range ports {
+			if existing == port {
+				return
+			}
+		}
+		ports = append(ports, port)
+	}
+
+	switch typed := rule["port"].(type) {
+	case float64:
+		addPort(int(typed))
+	case int:
+		addPort(typed)
+	case string:
+		for _, segment := range strings.Split(typed, ",") {
+			part := strings.TrimSpace(segment)
+			if part == "" {
+				continue
+			}
+			if strings.Contains(part, "-") {
+				bounds := strings.SplitN(part, "-", 2)
+				if port, err := strconv.Atoi(strings.TrimSpace(bounds[0])); err == nil {
+					addPort(port)
+				}
+				continue
+			}
+			if port, err := strconv.Atoi(part); err == nil {
+				addPort(port)
+			}
+		}
+	}
+
+	if len(ports) == 0 {
+		return []int{443, 80}
+	}
+	return ports
+}
+
+func buildTunDirectProbeRequestForDomain(value string, ports []int) (tunDirectProbeRequest, bool) {
+	normalized := strings.ToLower(normalizeTunDomainRule(value))
+	if normalized == "" {
+		return tunDirectProbeRequest{}, false
+	}
+
+	host := ""
+	switch {
+	case strings.HasPrefix(normalized, "full:"):
+		host = strings.TrimPrefix(normalized, "full:")
+	case strings.HasPrefix(normalized, "domain:"):
+		host = strings.TrimPrefix(normalized, "domain:")
+	default:
+		return tunDirectProbeRequest{}, false
+	}
+
+	host = strings.Trim(host, ".")
+	if host == "" || stdnet.ParseIP(host) != nil || len(ports) == 0 {
+		return tunDirectProbeRequest{}, false
+	}
+
+	return tunDirectProbeRequest{
+		Key:   tunDirectProbeKey("domain", host, ports),
+		Host:  host,
+		Ports: append([]int{}, ports...),
+	}, true
+}
+
+func buildTunDirectProbeRequestForIP(value string, ports []int) (tunDirectProbeRequest, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || len(ports) == 0 {
+		return tunDirectProbeRequest{}, false
+	}
+
+	host := ""
+	switch {
+	case strings.Contains(trimmed, "/"):
+		ip, network, err := stdnet.ParseCIDR(trimmed)
+		if err != nil {
+			return tunDirectProbeRequest{}, false
+		}
+		ones, bits := network.Mask.Size()
+		if ones != bits {
+			return tunDirectProbeRequest{}, false
+		}
+		host = ip.String()
+	default:
+		host = trimmed
+	}
+
+	ip := stdnet.ParseIP(host)
+	if ip == nil || ip.To4() == nil {
+		return tunDirectProbeRequest{}, false
+	}
+
+	host = ip.String()
+	return tunDirectProbeRequest{
+		Key:   tunDirectProbeKey("ip", host, ports),
+		Host:  host,
+		Ports: append([]int{}, ports...),
+	}, true
+}
+
+func tunDirectProbeKey(kind, host string, ports []int) string {
+	portText := make([]string, 0, len(ports))
+	for _, port := range ports {
+		portText = append(portText, strconv.Itoa(port))
+	}
+	return kind + "|" + strings.ToLower(strings.TrimSpace(host)) + "|" + strings.Join(portText, ",")
+}
+
+func loadTunDirectProbeCache(settings *TunFeatureSettings) tunDirectProbeCache {
+	cache := tunDirectProbeCache{
+		Version: tunDirectProbeCacheVersion,
+		Entries: make(map[string]tunDirectProbeCacheEntry),
+	}
+	if settings == nil || strings.TrimSpace(settings.StateDir) == "" {
+		return cache
+	}
+
+	raw, err := os.ReadFile(filepath.Join(settings.StateDir, tunDirectProbeCacheFileName))
+	if err != nil {
+		return cache
+	}
+	if err := json.Unmarshal(raw, &cache); err != nil {
+		return tunDirectProbeCache{
+			Version: tunDirectProbeCacheVersion,
+			Entries: make(map[string]tunDirectProbeCacheEntry),
+		}
+	}
+	if cache.Version != tunDirectProbeCacheVersion || cache.Entries == nil {
+		cache.Version = tunDirectProbeCacheVersion
+		cache.Entries = make(map[string]tunDirectProbeCacheEntry)
+	}
+	return cache
+}
+
+func saveTunDirectProbeCache(settings *TunFeatureSettings, cache tunDirectProbeCache) {
+	if settings == nil || strings.TrimSpace(settings.StateDir) == "" {
+		return
+	}
+	if cache.Entries == nil {
+		cache.Entries = make(map[string]tunDirectProbeCacheEntry)
+	}
+	cache.Version = tunDirectProbeCacheVersion
+
+	if err := os.MkdirAll(settings.StateDir, 0755); err != nil {
+		return
+	}
+
+	encoded, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(settings.StateDir, tunDirectProbeCacheFileName), append(bytes.TrimRight(encoded, "\n"), '\n'), 0644)
+}
+
+func runTunDirectProbeRequests(requests []tunDirectProbeRequest) map[string]bool {
+	results := make(map[string]bool, len(requests))
+	if len(requests) == 0 {
+		return results
+	}
+
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
+	sem := make(chan struct{}, tunDirectProbeConcurrency)
+
+	for _, request := range requests {
+		request := request
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			decision := probeTunDirectRequest(request)
+			<-sem
+
+			mu.Lock()
+			results[request.Key] = decision
+			mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+	return results
+}
+
+func probeTunDirectRequest(request tunDirectProbeRequest) bool {
+	if strings.TrimSpace(request.Host) == "" || len(request.Ports) == 0 {
+		return false
+	}
+
+	dialer := stdnet.Dialer{Timeout: tunDirectProbeTimeout}
+	for _, port := range request.Ports {
+		conn, err := dialer.Dial("tcp", stdnet.JoinHostPort(request.Host, strconv.Itoa(port)))
+		if err == nil {
+			_ = conn.Close()
+			return true
+		}
+	}
+	return false
 }
 
 func filterTunStringList(raw interface{}, keep func(string) bool) []string {
@@ -1081,6 +1912,16 @@ func filterTunStringList(raw interface{}, keep func(string) bool) []string {
 	return values
 }
 
+func filterTunStringSlice(values []string, keep func(string) bool) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if keep(value) {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
+}
+
 func isProtectedTunCIDRRule(value string, settings *TunFeatureSettings) bool {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" || settings == nil {
@@ -1095,13 +1936,13 @@ func isProtectedTunCIDRRule(value string, settings *TunFeatureSettings) bool {
 }
 
 func isProtectedTunDomainRule(value string, settings *TunFeatureSettings) bool {
-	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized := strings.ToLower(normalizeTunDomainRule(value))
 	if normalized == "" {
 		return false
 	}
 	if settings != nil {
 		for _, protected := range settings.ProtectDomains {
-			if normalized == strings.ToLower(strings.TrimSpace(protected)) {
+			if normalized == strings.ToLower(normalizeTunDomainRule(protected)) {
 				return true
 			}
 		}

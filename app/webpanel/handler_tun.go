@@ -1,6 +1,9 @@
 package webpanel
 
-import "net/http"
+import (
+	"encoding/json"
+	"net/http"
+)
 
 func (wp *WebPanel) handleTunStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -18,6 +21,41 @@ func (wp *WebPanel) handleTunStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, wp.tunStatusSnapshot())
+}
+
+func (wp *WebPanel) handleTunSettings(w http.ResponseWriter, r *http.Request) {
+	if wp.tunManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "TUN manager is not configured")
+		return
+	}
+
+	if ok := wp.enforceTunAccess(w, r); !ok {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		settings, err := wp.tunManager.EditableSettings()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to load TUN settings: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, settings)
+	case http.MethodPut:
+		var req TunEditableSettings
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+			return
+		}
+		settings, err := wp.tunManager.UpdateEditableSettings(req)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to save TUN settings: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, settings)
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (wp *WebPanel) handleTunStart(w http.ResponseWriter, r *http.Request) {

@@ -222,6 +222,7 @@ func (wp *WebPanel) registerRoutes(mux *http.ServeMux) {
 
 	// Transparent TUN
 	mux.HandleFunc("/api/v1/tun/status", wp.authMiddleware(wp.handleTunStatus))
+	mux.HandleFunc("/api/v1/tun/settings", wp.authMiddleware(wp.handleTunSettings))
 	mux.HandleFunc("/api/v1/tun/start", wp.authMiddleware(wp.handleTunStart))
 	mux.HandleFunc("/api/v1/tun/stop", wp.authMiddleware(wp.handleTunStop))
 	mux.HandleFunc("/api/v1/tun/restore-clean", wp.authMiddleware(wp.handleTunRestoreClean))

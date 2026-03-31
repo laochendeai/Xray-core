@@ -4,9 +4,29 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func mustGenerateTunTestURI(t *testing.T, address string) string {
+	t.Helper()
+
+	uri, err := GenerateShareLink(ShareLinkRequest{
+		Protocol: "vmess",
+		Address:  address,
+		Port:     443,
+		UUID:     "11111111-1111-1111-1111-111111111111",
+		Remark:   "pool-active",
+		TLS:      "tls",
+		SNI:      "example.com",
+	})
+	if err != nil {
+		t.Fatalf("generate share link: %v", err)
+	}
+
+	return uri
+}
 
 func TestBuildTunRuntimeConfigInjectsActivePool(t *testing.T) {
 	t.Parallel()
@@ -20,18 +40,7 @@ func TestBuildTunRuntimeConfigInjectsActivePool(t *testing.T) {
   }
 }`)
 
-	uri, err := GenerateShareLink(ShareLinkRequest{
-		Protocol: "vmess",
-		Address:  "203.0.113.11",
-		Port:     443,
-		UUID:     "11111111-1111-1111-1111-111111111111",
-		Remark:   "pool-active",
-		TLS:      "tls",
-		SNI:      "example.com",
-	})
-	if err != nil {
-		t.Fatalf("generate share link: %v", err)
-	}
+	uri := mustGenerateTunTestURI(t, "203.0.113.11")
 
 	output, err := buildTunRuntimeConfig(baseConfig, &TunFeatureSettings{
 		InterfaceName:  "xray0",
@@ -60,6 +69,129 @@ func TestBuildTunRuntimeConfigInjectsActivePool(t *testing.T) {
 		if !strings.Contains(rendered, token) {
 			t.Fatalf("expected runtime config to contain %q\n%s", token, rendered)
 		}
+	}
+}
+
+func TestBuildTunRuntimeConfigUsesLowestLatencyPolicy(t *testing.T) {
+	t.Parallel()
+
+	baseConfig := []byte(`{
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "observatory": {
+    "subjectSelector": ["proxy-"],
+    "probeURL": "https://latency.example.test/generate_204",
+    "probeInterval": "20s"
+  },
+  "routing": {
+    "rules": []
+  }
+}`)
+
+	output, err := buildTunRuntimeConfig(baseConfig, &TunFeatureSettings{
+		InterfaceName:   "xray0",
+		MTU:             1500,
+		SelectionPolicy: string(TunSelectionPolicyLowestLatency),
+		ProtectCIDRs:    []string{"127.0.0.0/8"},
+		ProtectDomains:  []string{"full:localhost"},
+	}, []NodeRecord{
+		{ID: "node-1", URI: mustGenerateTunTestURI(t, "203.0.113.31"), AvgDelayMs: 88, TotalPings: 10},
+		{ID: "node-2", URI: mustGenerateTunTestURI(t, "203.0.113.32"), AvgDelayMs: 21, TotalPings: 10},
+	})
+	if err != nil {
+		t.Fatalf("build tun runtime config: %v", err)
+	}
+
+	var rendered map[string]any
+	if err := json.Unmarshal(output, &rendered); err != nil {
+		t.Fatalf("decode rendered config: %v", err)
+	}
+
+	routing := rendered["routing"].(map[string]any)
+	balancers := routing["balancers"].([]any)
+	balancer := balancers[0].(map[string]any)
+	if balancer["fallbackTag"] != "pool-active-node-2" {
+		t.Fatalf("expected fallback tag to prefer the lowest latency node, got %v", balancer["fallbackTag"])
+	}
+
+	strategy := balancer["strategy"].(map[string]any)
+	if strategy["type"] != "leastping" {
+		t.Fatalf("expected leastping strategy, got %v", strategy["type"])
+	}
+
+	burstObservatory := rendered["burstObservatory"].(map[string]any)
+	pingConfig := burstObservatory["pingConfig"].(map[string]any)
+	if pingConfig["destination"] != "https://latency.example.test/generate_204" {
+		t.Fatalf("expected burst observatory destination to inherit probe URL, got %v", pingConfig["destination"])
+	}
+	if pingConfig["interval"] != "20s" {
+		t.Fatalf("expected burst observatory interval to inherit probe interval, got %v", pingConfig["interval"])
+	}
+}
+
+func TestBuildTunRuntimeConfigUsesLowestFailRateSubset(t *testing.T) {
+	t.Parallel()
+
+	baseConfig := []byte(`{
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "routing": {
+    "rules": []
+  }
+}`)
+
+	output, err := buildTunRuntimeConfig(baseConfig, &TunFeatureSettings{
+		InterfaceName:   "xray0",
+		MTU:             1500,
+		SelectionPolicy: string(TunSelectionPolicyLowestFailRate),
+		ProtectCIDRs:    []string{"127.0.0.0/8"},
+		ProtectDomains:  []string{"full:localhost"},
+	}, []NodeRecord{
+		{ID: "node-a", URI: mustGenerateTunTestURI(t, "203.0.113.41"), AvgDelayMs: 80, TotalPings: 10, FailedPings: 0},
+		{ID: "node-b", URI: mustGenerateTunTestURI(t, "203.0.113.42"), AvgDelayMs: 25, TotalPings: 10, FailedPings: 1},
+		{ID: "node-c", URI: mustGenerateTunTestURI(t, "203.0.113.43"), AvgDelayMs: 60, TotalPings: 6, FailedPings: 0},
+		{ID: "node-d", URI: mustGenerateTunTestURI(t, "203.0.113.44"), AvgDelayMs: 10, TotalPings: 10, FailedPings: 5},
+	})
+	if err != nil {
+		t.Fatalf("build tun runtime config: %v", err)
+	}
+
+	var rendered map[string]any
+	if err := json.Unmarshal(output, &rendered); err != nil {
+		t.Fatalf("decode rendered config: %v", err)
+	}
+
+	routing := rendered["routing"].(map[string]any)
+	balancers := routing["balancers"].([]any)
+	balancer := balancers[0].(map[string]any)
+	if balancer["fallbackTag"] != "pool-active-node-c" {
+		t.Fatalf("expected fallback tag to prefer the lowest fail-rate node, got %v", balancer["fallbackTag"])
+	}
+
+	selectors := balancer["selector"].([]any)
+	selectorSet := make(map[string]struct{}, len(selectors))
+	for _, rawSelector := range selectors {
+		selectorSet[rawSelector.(string)] = struct{}{}
+	}
+
+	for _, expected := range []string{
+		"pool-active-node-a",
+		"pool-active-node-b",
+		"pool-active-node-c",
+	} {
+		if _, ok := selectorSet[expected]; !ok {
+			t.Fatalf("expected selector set to include %s, got %v", expected, selectorSet)
+		}
+	}
+	if _, ok := selectorSet["pool-active-node-d"]; ok {
+		t.Fatalf("expected highest fail-rate node to be excluded, got %v", selectorSet)
+	}
+
+	strategy := balancer["strategy"].(map[string]any)
+	if strategy["type"] != "leastping" {
+		t.Fatalf("expected leastping strategy inside the fail-rate subset, got %v", strategy["type"])
 	}
 }
 
@@ -285,6 +417,197 @@ func TestBuildTunRuntimeConfigDropsWideBaseDirectRulesButKeepsProtectedLocalEntr
 	}
 	if !hasTailscaleDirect {
 		t.Fatal("expected local tailscale domain protection to remain in tun runtime")
+	}
+}
+
+func TestBuildTunRuntimeConfigAutoTestedModeKeepsSuccessfulDirectCandidates(t *testing.T) {
+	t.Parallel()
+
+	baseConfig := []byte(`{
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "domain": [
+          "domain:ifconfig.me",
+          "domain:blocked.example",
+          "full:localhost"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "47.237.11.85",
+          "203.0.113.0/24",
+          "127.0.0.0/8"
+        ],
+        "port": "3000",
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}`)
+
+	uri := mustGenerateTunTestURI(t, "203.0.113.55")
+	output, err := buildTunRuntimeConfigWithDirectProbeResults(baseConfig, &TunFeatureSettings{
+		InterfaceName:  "xray0",
+		MTU:            1500,
+		RouteMode:      string(TunRouteModeAutoTested),
+		ProtectCIDRs:   []string{"127.0.0.0/8"},
+		ProtectDomains: []string{"full:localhost"},
+	}, []NodeRecord{{ID: "node-1", URI: uri}}, map[string]bool{
+		tunDirectProbeKey("domain", "ifconfig.me", []int{443, 80}):     true,
+		tunDirectProbeKey("domain", "blocked.example", []int{443, 80}): false,
+		tunDirectProbeKey("ip", "47.237.11.85", []int{3000}):           true,
+	})
+	if err != nil {
+		t.Fatalf("build tun runtime config: %v", err)
+	}
+
+	var rendered map[string]any
+	if err := json.Unmarshal(output, &rendered); err != nil {
+		t.Fatalf("decode rendered config: %v", err)
+	}
+
+	routing, ok := rendered["routing"].(map[string]any)
+	if !ok {
+		t.Fatal("expected routing section in runtime config")
+	}
+	rules, ok := routing["rules"].([]any)
+	if !ok {
+		t.Fatal("expected routing rules in runtime config")
+	}
+
+	hasIfconfigDirect := false
+	hasBlockedDirect := false
+	hasLocalhostDirect := false
+	hasTestedIPDirect := false
+	hasCIDRDirect := false
+	hasLocalCIDRDirect := false
+	for _, rawRule := range rules {
+		rule, ok := rawRule.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		if domains, ok := rule["domain"].([]any); ok {
+			for _, domain := range domains {
+				switch domain {
+				case "domain:ifconfig.me":
+					hasIfconfigDirect = true
+				case "domain:blocked.example":
+					hasBlockedDirect = true
+				case "full:localhost":
+					hasLocalhostDirect = true
+				}
+			}
+		}
+
+		if ips, ok := rule["ip"].([]any); ok {
+			for _, ip := range ips {
+				switch ip {
+				case "47.237.11.85":
+					hasTestedIPDirect = true
+				case "203.0.113.0/24":
+					hasCIDRDirect = true
+				case "127.0.0.0/8":
+					hasLocalCIDRDirect = true
+				}
+			}
+		}
+	}
+
+	if !hasIfconfigDirect {
+		t.Fatal("expected successful direct probe domain to remain direct")
+	}
+	if hasBlockedDirect {
+		t.Fatal("expected failed direct probe domain to fall back to proxy")
+	}
+	if !hasLocalhostDirect {
+		t.Fatal("expected protected localhost rule to remain direct")
+	}
+	if !hasTestedIPDirect {
+		t.Fatal("expected successful tested IP rule to remain direct")
+	}
+	if hasCIDRDirect {
+		t.Fatal("expected unsupported non-host CIDR to fall back to proxy")
+	}
+	if !hasLocalCIDRDirect {
+		t.Fatal("expected protected local CIDR to remain direct")
+	}
+}
+
+func TestTunManagerUpdateEditableSettingsNormalizesWildcardProtectDomains(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "webpanel": {
+    "tun": {}
+  }
+}
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tunManager, err := NewTunManager(configPath)
+	if err != nil {
+		t.Fatalf("new tun manager: %v", err)
+	}
+
+	settings, err := tunManager.UpdateEditableSettings(TunEditableSettings{
+		SelectionPolicy: string(TunSelectionPolicyFastest),
+		RouteMode:       string(TunRouteModeStrictProxy),
+		ProtectDomains:  []string{"*.example.com", "domain:example.net", ".internal.example", "*.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("update editable settings: %v", err)
+	}
+
+	expected := []string{"domain:example.com", "domain:example.net", "domain:internal.example"}
+	if !reflect.DeepEqual(settings.ProtectDomains, expected) {
+		t.Fatalf("expected normalized protect domains %v, got %v", expected, settings.ProtectDomains)
+	}
+}
+
+func TestTunManagerEditableSettingsNormalizesWildcardProtectDomainsFromConfig(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "webpanel": {
+    "tun": {
+      "protectDomains": ["*.example.com", ".internal.example", "full:exact.example"]
+    }
+  }
+}
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tunManager, err := NewTunManager(configPath)
+	if err != nil {
+		t.Fatalf("new tun manager: %v", err)
+	}
+
+	settings, err := tunManager.EditableSettings()
+	if err != nil {
+		t.Fatalf("editable settings: %v", err)
+	}
+
+	expected := []string{"domain:example.com", "domain:internal.example", "full:exact.example"}
+	if !reflect.DeepEqual(settings.ProtectDomains, expected) {
+		t.Fatalf("expected normalized protect domains %v, got %v", expected, settings.ProtectDomains)
 	}
 }
 

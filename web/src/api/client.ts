@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { NodePoolDashboardResponse, TunStatusResponse, ValidationConfig } from './types'
+import type { NodePoolDashboardResponse, TunEditableSettings, TunStatusResponse, ValidationConfig } from './types'
 
 const apiClient = axios.create({
   baseURL: '/api/v1',
@@ -91,6 +91,8 @@ export const configAPI = {
 
 export const tunAPI = {
   status: () => apiClient.get('/tun/status') as Promise<TunStatusResponse>,
+  getSettings: () => apiClient.get('/tun/settings') as Promise<TunEditableSettings>,
+  updateSettings: (settings: TunEditableSettings) => apiClient.put('/tun/settings', settings) as Promise<TunEditableSettings>,
   start: () => apiClient.post('/tun/start') as Promise<TunStatusResponse>,
   stop: () => apiClient.post('/tun/stop') as Promise<TunStatusResponse>,
   restoreClean: () => apiClient.post('/tun/restore-clean') as Promise<TunStatusResponse>,
@@ -115,6 +117,7 @@ export const nodePoolAPI = {
   list: (status?: string) =>
     apiClient.get('/node-pool', { params: status ? { status } : {} }) as Promise<NodePoolDashboardResponse>,
   promote: (id: string) => apiClient.post(`/node-pool/${id}/promote`) as Promise<any>,
+  bulkPromote: (payload: { ids: string[] }) => apiClient.post('/node-pool/bulk-promote', payload) as Promise<any>,
   quarantine: (id: string) => apiClient.post(`/node-pool/${id}/quarantine`) as Promise<any>,
   demote: (id: string) => apiClient.post(`/node-pool/${id}/demote`) as Promise<any>,
   remove: (id: string) => apiClient.post(`/node-pool/${id}/remove`) as Promise<any>,

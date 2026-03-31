@@ -220,3 +220,13 @@ export interface TunStatusResponse {
   lastStateChangedAt?: string
   recentMachineEvents?: MachineEvent[]
 }
+
+export type TunSelectionPolicy = 'fastest' | 'lowest_latency' | 'lowest_fail_rate'
+export type TunRouteMode = 'strict_proxy' | 'auto_tested'
+
+export interface TunEditableSettings {
+  selectionPolicy: TunSelectionPolicy
+  routeMode: TunRouteMode
+  protectDomains: string[]
+  protectCidrs: string[]
+}
