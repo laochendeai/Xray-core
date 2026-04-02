@@ -354,8 +354,8 @@ func (m *TunManager) installPrivilegeLocked(settings *TunFeatureSettings) (strin
 		return "", fmt.Errorf("tun settings are not configured")
 	}
 
-	if _, err := exec.LookPath("pkexec"); err != nil {
-		return "", fmt.Errorf("pkexec is not available: %w", err)
+	if _, ok := resolveCommandPath("pkexec"); !ok {
+		return "", fmt.Errorf("pkexec is not available")
 	}
 
 	configPath, err := filepath.Abs(m.configPath)
@@ -403,8 +403,8 @@ func (m *TunManager) installPrivilegeLocked(settings *TunFeatureSettings) (strin
 		return trimmed, nil
 	}
 
-	if _, err := exec.LookPath("pkexec"); err != nil {
-		return "", fmt.Errorf("pkexec is not available: %w", err)
+	if _, ok := resolveCommandPath("pkexec"); !ok {
+		return "", fmt.Errorf("pkexec is not available")
 	}
 
 	cmd := execCommandCompat("pkexec", installArgs...)
@@ -427,7 +427,7 @@ func graphicalSudoAvailable(askpassScriptPath string) bool {
 	if strings.TrimSpace(os.Getenv("DISPLAY")) == "" {
 		return false
 	}
-	if _, err := exec.LookPath("sudo"); err != nil {
+	if _, ok := resolveCommandPath("sudo"); !ok {
 		return false
 	}
 	if _, err := os.Stat(askpassScriptPath); err != nil {
@@ -444,9 +444,9 @@ func graphicalSudoAvailable(askpassScriptPath string) bool {
 // Some CI environments expose sudo/pkexec/test helpers as shebang scripts
 // that are not directly spawnable on Windows. Use the declared interpreter when needed.
 func prepareCommandInvocation(name string, args []string) (string, []string) {
-	resolvedName := name
-	if candidate, err := exec.LookPath(name); err == nil {
-		resolvedName = candidate
+	resolvedName, ok := resolveCommandPath(name)
+	if !ok {
+		return name, args
 	}
 
 	interpreter, interpreterArgs, ok := detectScriptInterpreter(resolvedName)
@@ -459,6 +459,31 @@ func prepareCommandInvocation(name string, args []string) (string, []string) {
 	invocationArgs = append(invocationArgs, resolvedName)
 	invocationArgs = append(invocationArgs, args...)
 	return interpreter, invocationArgs
+}
+
+func resolveCommandPath(name string) (string, bool) {
+	if candidate, err := exec.LookPath(name); err == nil {
+		return candidate, true
+	}
+
+	if strings.ContainsAny(name, `/\`) {
+		if info, err := os.Stat(name); err == nil && !info.IsDir() {
+			return name, true
+		}
+		return name, false
+	}
+
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, true
+		}
+	}
+
+	return name, false
 }
 
 func detectScriptInterpreter(path string) (string, []string, bool) {
@@ -2081,7 +2106,7 @@ func uniqStrings(values []string) []string {
 }
 
 func checkSudoReady(settings *TunFeatureSettings) bool {
-	if _, err := exec.LookPath("sudo"); err != nil {
+	if _, ok := resolveCommandPath("sudo"); !ok {
 		return false
 	}
 

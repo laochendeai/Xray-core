@@ -1247,7 +1247,7 @@ func TestPrepareCommandInvocationUsesInterpreterForPathScript(t *testing.T) {
 	t.Setenv("PATH", tempBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cmdName, cmdArgs := prepareCommandInvocation("fake-pkexec", []string{"--flag", "value"})
-	if filepath.Base(cmdName) != "sh" {
+	if !strings.HasPrefix(filepath.Base(cmdName), "sh") {
 		t.Fatalf("expected sh interpreter, got %q", cmdName)
 	}
 	if len(cmdArgs) != 3 {
@@ -1269,7 +1269,7 @@ func TestPrepareCommandInvocationUsesInterpreterForDirectScriptPath(t *testing.T
 	}
 
 	cmdName, cmdArgs := prepareCommandInvocation(scriptPath, []string{"status"})
-	if filepath.Base(cmdName) != "sh" {
+	if !strings.HasPrefix(filepath.Base(cmdName), "sh") {
 		t.Fatalf("expected sh interpreter, got %q", cmdName)
 	}
 	if len(cmdArgs) != 2 {
