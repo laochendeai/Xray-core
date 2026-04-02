@@ -74,6 +74,9 @@
           {{ t('nodePool.transparentRoutingRunningHint') }}
         </n-alert>
         <div class="node-pool-meta">{{ t('nodePool.transparentRoutingWhitelistHint') }}</div>
+        <n-alert type="info" :title="t('nodePool.remoteDnsGuideTitle')">
+          {{ t('nodePool.remoteDnsGuideBody') }}
+        </n-alert>
         <div v-if="tunSettingsForm.routeMode === 'auto_tested'" class="node-pool-meta">
           {{ t('nodePool.routeModeAutoHint') }}
         </div>
@@ -83,6 +86,14 @@
           </n-form-item>
           <n-form-item :label="t('nodePool.selectionPolicy')">
             <n-select v-model:value="tunSettingsForm.selectionPolicy" :options="selectionPolicyOptions" />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.remoteDns')">
+            <n-input
+              v-model:value="tunRemoteDnsText"
+              type="textarea"
+              :autosize="{ minRows: 4, maxRows: 10 }"
+              :placeholder="t('nodePool.remoteDnsPlaceholder')"
+            />
           </n-form-item>
           <n-form-item :label="t('nodePool.protectDomains')">
             <n-input
@@ -130,6 +141,46 @@
 
     <section class="section-block">
       <n-space justify="space-between" align="center" wrap>
+        <h3>{{ t('nodePool.lifecycleGuideTitle') }}</h3>
+      </n-space>
+      <div class="pool-guide-grid">
+        <div v-for="step in poolLifecycleSteps" :key="step.status" class="pool-guide-item">
+          <n-tag size="small" :type="statusTagType(step.status)">
+            {{ statusLabel(step.status) }}
+          </n-tag>
+          <div class="pool-guide-desc">{{ step.description }}</div>
+        </div>
+      </div>
+      <div class="node-pool-meta">{{ t('nodePool.lifecycleGuideHint') }}</div>
+    </section>
+
+    <section class="section-block">
+      <n-space justify="space-between" align="center" wrap>
+        <h3>{{ t('nodePool.fullFailureCleanupTitle') }}</h3>
+        <n-space align="center" :size="8" wrap>
+          <span class="node-pool-meta">
+            {{ t('nodePool.fullFailureCleanupCount', { count: fullFailureRemovalCandidates.length }) }}
+          </span>
+          <n-input-number v-model:value="fullFailureThreshold" :min="1" :max="100000" />
+          <n-popconfirm @positive-click="handleBulkRemoveFullFailures">
+            <template #trigger>
+              <n-button
+                type="warning"
+                :disabled="!fullFailureRemovalCandidates.length"
+                :loading="bulkRemovingFullFailures"
+              >
+                {{ t('nodePool.fullFailureCleanupAction') }}
+              </n-button>
+            </template>
+            {{ t('nodePool.fullFailureCleanupConfirm', { count: fullFailureRemovalCandidates.length }) }}
+          </n-popconfirm>
+        </n-space>
+      </n-space>
+      <div class="node-pool-meta">{{ t('nodePool.fullFailureCleanupHint') }}</div>
+    </section>
+
+    <section class="section-block">
+      <n-space justify="space-between" align="center" wrap>
         <h3>{{ t('nodePool.recentEvents') }}</h3>
         <span class="node-pool-meta" v-if="formattedSummaryEvaluatedAt">
           {{ t('nodePool.lastEvaluatedAt') }}: {{ formattedSummaryEvaluatedAt }}
@@ -161,6 +212,7 @@
     <section class="section-block">
       <n-space justify="space-between" align="center" wrap>
         <h3>{{ t('nodePool.status.active') }} ({{ activeNodes.length }})</h3>
+        <n-select v-model:value="activeSortMode" :options="poolSortOptions" class="pool-sort-select" />
       </n-space>
       <template v-if="activeNodes.length">
         <n-data-table
@@ -221,8 +273,12 @@
           <n-button v-if="selectedStagingIds.length" size="small" secondary @click="clearSelection('staging')">
             {{ t('common.reset') }}
           </n-button>
+          <n-select v-model:value="stagingSortMode" :options="poolSortOptions" class="pool-sort-select" />
         </n-space>
       </n-space>
+      <div v-if="validationPoolHint" class="node-pool-meta">
+        {{ validationPoolHint }}
+      </div>
       <template v-if="stagingNodes.length">
         <n-data-table
           v-if="!isCompact"
@@ -299,6 +355,7 @@
           >
             {{ t('nodePool.bulkRemoveUnstable') }}
           </n-button>
+          <n-select v-model:value="quarantineSortMode" :options="poolSortOptions" class="pool-sort-select" />
         </n-space>
       </n-space>
       <template v-if="quarantineNodes.length">
@@ -351,19 +408,55 @@
     <section class="section-block">
       <n-space justify="space-between" align="center" wrap>
         <h3>{{ t('nodePool.status.candidate') }} ({{ candidateNodes.length }})</h3>
+        <n-space align="center" :size="8" wrap>
+          <span v-if="selectedCandidateIds.length" class="node-pool-meta">
+            {{ t('nodePool.selectedCount', { count: selectedCandidateIds.length }) }}
+          </span>
+          <n-button
+            v-if="candidateNodes.length"
+            size="small"
+            type="primary"
+            :disabled="!selectedCandidateIds.length"
+            :loading="bulkValidating"
+            @click="handleBulkValidateCandidate"
+          >
+            {{ t('nodePool.bulkValidate') }}
+          </n-button>
+          <n-popconfirm v-if="selectedCandidateIds.length" @positive-click="handleBulkRemoveCandidate">
+            <template #trigger>
+              <n-button size="small" type="error" secondary :loading="bulkRemovingCandidates">
+                {{ t('nodePool.bulkRemoveSelectedCandidates') }}
+              </n-button>
+            </template>
+            {{ t('nodePool.bulkRemoveSelectedCandidatesConfirm', { count: selectedCandidateIds.length }) }}
+          </n-popconfirm>
+          <n-button v-if="selectedCandidateIds.length" size="small" secondary @click="clearSelection('candidate')">
+            {{ t('common.reset') }}
+          </n-button>
+          <n-select v-model:value="candidateSortMode" :options="poolSortOptions" class="pool-sort-select" />
+        </n-space>
       </n-space>
+      <div class="node-pool-meta">{{ t('nodePool.candidateSectionHint') }}</div>
       <template v-if="candidateNodes.length">
         <n-data-table
           v-if="!isCompact"
           :columns="candidateColumns"
           :data="candidateNodes"
+          :row-key="rowKey"
+          :checked-row-keys="selectedCandidateIds"
           :loading="loading"
           :pagination="{ pageSize: 10 }"
+          @update:checked-row-keys="(keys) => handleCheckedRowKeysUpdate('candidate', keys)"
         />
         <div v-else class="node-card-list">
           <div v-for="node in candidateNodes" :key="node.id" class="node-card">
             <div class="node-card-header">
-              <strong>{{ node.remark || node.address }}</strong>
+              <n-checkbox
+                :checked="isSelected('candidate', node.id)"
+                @update:checked="(checked) => setCardSelection('candidate', node.id, checked)"
+              >
+                {{ node.remark || node.address }}
+              </n-checkbox>
               <n-tag size="small" :type="statusTagType(node.status)">
                 {{ statusLabel(node.status) }}
               </n-tag>
@@ -377,6 +470,9 @@
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
             </n-space>
             <n-space :size="8" class="node-card-actions">
+              <n-button size="small" type="primary" @click="handleValidate(node.id)">
+                {{ t('nodePool.validate') }}
+              </n-button>
               <n-button size="small" type="error" @click="handleRemove(node.id)">
                 {{ t('nodePool.remove') }}
               </n-button>
@@ -389,24 +485,87 @@
 
     <n-collapse>
       <n-collapse-item :title="`${t('nodePool.status.removed')} (${removedNodes.length})`">
+        <n-space justify="space-between" align="center" wrap class="removed-toolbar">
+          <n-space align="center" :size="8" wrap>
+            <div class="node-pool-meta">{{ t('nodePool.removedSectionHint') }}</div>
+            <span v-if="selectedRemovedIds.length" class="node-pool-meta">
+              {{ t('nodePool.selectedCount', { count: selectedRemovedIds.length }) }}
+            </span>
+            <span v-if="removedFullFailureNodes.length" class="node-pool-meta">
+              {{ t('nodePool.removedFullFailureCount', { count: removedFullFailureNodes.length }) }}
+            </span>
+            <n-button
+              v-if="removedNodes.length"
+              size="small"
+              type="primary"
+              :disabled="!selectedRemovedIds.length"
+              :loading="bulkRestoringRemoved"
+              @click="handleBulkRestoreRemoved"
+            >
+              {{ t('nodePool.bulkRestoreCandidate') }}
+            </n-button>
+            <n-button v-if="selectedRemovedIds.length" size="small" secondary @click="clearSelection('removed')">
+              {{ t('common.reset') }}
+            </n-button>
+            <n-popconfirm v-if="selectedRemovedIds.length" @positive-click="handleBulkPurgeSelectedRemoved">
+              <template #trigger>
+                <n-button size="small" type="error" secondary :loading="bulkPurgingSelectedRemoved">
+                  {{ t('nodePool.bulkPurgeSelectedRemoved') }}
+                </n-button>
+              </template>
+              {{ t('nodePool.bulkPurgeSelectedRemovedConfirm', { count: selectedRemovedIds.length }) }}
+            </n-popconfirm>
+            <n-popconfirm v-if="removedFullFailureNodes.length" @positive-click="handleBulkPurgeRemovedFullFailures">
+              <template #trigger>
+                <n-button size="small" type="error" secondary :loading="bulkPurgingRemoved">
+                  {{ t('nodePool.bulkPurgeRemovedFullFailures') }}
+                </n-button>
+              </template>
+              {{ t('nodePool.bulkPurgeRemovedFullFailuresConfirm', { count: removedFullFailureNodes.length }) }}
+            </n-popconfirm>
+          </n-space>
+          <n-select v-model:value="removedSortMode" :options="removedSortOptions" class="pool-sort-select" />
+        </n-space>
         <n-empty v-if="!removedNodes.length" :description="t('nodePool.emptyRemoved')" />
         <n-data-table
           v-else-if="!isCompact"
           :columns="removedColumns"
           :data="removedNodes"
+          :row-key="rowKey"
+          :checked-row-keys="selectedRemovedIds"
           :loading="loading"
           :pagination="{ pageSize: 10 }"
+          @update:checked-row-keys="(keys) => handleCheckedRowKeysUpdate('removed', keys)"
         />
         <div v-else class="node-card-list">
           <div v-for="node in removedNodes" :key="node.id" class="node-card">
             <div class="node-card-header">
-              <strong>{{ node.remark || node.address }}</strong>
+              <n-checkbox
+                :checked="isSelected('removed', node.id)"
+                @update:checked="(checked) => setCardSelection('removed', node.id, checked)"
+              >
+                {{ node.remark || node.address }}
+              </n-checkbox>
               <n-tag size="small" :type="statusTagType(node.status)">
                 {{ statusLabel(node.status) }}
               </n-tag>
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ reasonLabel(node.statusReason) }}</div>
+            <div class="node-card-meta">{{ t('nodePool.removedAt') }}: {{ formatDateTime(node.statusUpdatedAt || node.lastEventAt || node.addedAt) || '-' }}</div>
+            <n-space :size="8" class="node-card-actions">
+              <n-button size="small" type="primary" @click="handleRestore(node.id)">
+                {{ t('nodePool.restoreNode') }}
+              </n-button>
+              <n-popconfirm @positive-click="handlePurgeRemoved(node.id)">
+                <template #trigger>
+                  <n-button size="small" type="error" secondary :loading="purgingRemovedNodeId === node.id">
+                    {{ t('nodePool.purgeRemovedNode') }}
+                  </n-button>
+                </template>
+                {{ t('nodePool.purgeRemovedConfirm') }}
+              </n-popconfirm>
+            </n-space>
           </div>
         </div>
       </n-collapse-item>
@@ -414,40 +573,55 @@
 
     <n-collapse>
       <n-collapse-item :title="t('nodePool.validationConfig')">
-        <n-form :model="configForm" label-placement="left" label-width="220px">
-          <n-form-item :label="t('nodePool.minActiveNodes')">
-            <n-input-number v-model:value="configForm.minActiveNodes" :min="1" :max="20" />
-          </n-form-item>
-          <n-form-item :label="t('nodePool.minSamples')">
-            <n-input-number v-model:value="configForm.minSamples" :min="1" :max="100" />
-          </n-form-item>
-          <n-form-item :label="t('nodePool.maxFailRate')">
-            <n-input-number v-model:value="configForm.maxFailRate" :min="0" :max="1" :step="0.05" />
-          </n-form-item>
-          <n-form-item :label="t('nodePool.maxAvgDelay')">
-            <n-input-number v-model:value="configForm.maxAvgDelayMs" :min="100" :max="10000" :step="100" />
-          </n-form-item>
-          <n-form-item :label="t('nodePool.demoteAfterFails')">
-            <n-input-number v-model:value="configForm.demoteAfterFails" :min="1" :max="50" />
-          </n-form-item>
-          <n-form-item :label="t('nodePool.probeInterval')">
-            <n-input-number v-model:value="configForm.probeIntervalSec" :min="10" :max="3600" />
-          </n-form-item>
-          <n-form-item :label="t('nodePool.probeUrl')">
-            <n-input v-model:value="configForm.probeUrl" />
-          </n-form-item>
-          <n-form-item :label="t('nodePool.minBandwidthKbps')">
-            <n-input-number v-model:value="configForm.minBandwidthKbps" :min="0" :max="1000000" :step="1000" />
-          </n-form-item>
-          <n-form-item :label="t('nodePool.autoRemoveDemoted')">
-            <n-switch v-model:value="configForm.autoRemoveDemoted" />
-          </n-form-item>
-          <n-form-item>
-            <n-button type="primary" :loading="savingConfig" @click="handleSaveConfig">
-              {{ t('nodePool.saveConfig') }}
-            </n-button>
-          </n-form-item>
-        </n-form>
+        <div class="validation-config-layout">
+          <n-form :model="configForm" label-placement="left" label-width="220px" class="validation-config-form">
+            <n-form-item :label="t('nodePool.minActiveNodes')">
+              <n-input-number v-model:value="configForm.minActiveNodes" :min="1" :max="20" />
+            </n-form-item>
+            <n-form-item :label="t('nodePool.minSamples')">
+              <n-input-number v-model:value="configForm.minSamples" :min="1" :max="100" />
+            </n-form-item>
+            <n-form-item :label="t('nodePool.maxFailRate')">
+              <n-input-number v-model:value="configForm.maxFailRate" :min="0" :max="1" :step="0.05" />
+            </n-form-item>
+            <n-form-item :label="t('nodePool.maxAvgDelay')">
+              <n-input-number v-model:value="configForm.maxAvgDelayMs" :min="100" :max="10000" :step="100" />
+            </n-form-item>
+            <n-form-item :label="t('nodePool.demoteAfterFails')">
+              <n-input-number v-model:value="configForm.demoteAfterFails" :min="1" :max="50" />
+            </n-form-item>
+            <n-form-item :label="t('nodePool.probeInterval')">
+              <n-input-number v-model:value="configForm.probeIntervalSec" :min="10" :max="3600" />
+            </n-form-item>
+            <n-form-item :label="t('nodePool.probeUrl')">
+              <n-input v-model:value="configForm.probeUrl" />
+            </n-form-item>
+            <n-form-item :label="t('nodePool.minBandwidthKbps')">
+              <n-input-number v-model:value="configForm.minBandwidthKbps" :min="0" :max="1000000" :step="1000" />
+            </n-form-item>
+            <n-form-item :label="t('nodePool.autoRemoveDemoted')">
+              <n-switch v-model:value="configForm.autoRemoveDemoted" />
+            </n-form-item>
+            <n-form-item>
+              <n-button type="primary" :loading="savingConfig" @click="handleSaveConfig">
+                {{ t('nodePool.saveConfig') }}
+              </n-button>
+            </n-form-item>
+          </n-form>
+
+          <div class="validation-config-guide">
+            <n-alert type="info" :title="t('nodePool.validationGuideTitle')">
+              {{ t('nodePool.validationGuideSummary') }}
+            </n-alert>
+            <div class="validation-guide-list">
+              <div v-for="item in validationConfigGuideItems" :key="item.key" class="validation-guide-item">
+                <strong>{{ item.label }}</strong>
+                <div class="node-pool-meta">{{ item.description }}</div>
+              </div>
+            </div>
+            <div class="validation-guide-footnote">{{ t('nodePool.validationGuideRuleOfThumb') }}</div>
+          </div>
+        </div>
       </n-collapse-item>
     </n-collapse>
   </n-space>
@@ -501,16 +675,34 @@ import type {
 const { t, te } = useI18n()
 const message = useMessage()
 
+type PoolSortMode = 'quality' | 'last_checked_desc' | 'last_checked_asc' | 'fail_rate_asc' | 'fail_rate_desc' | 'avg_delay_asc' | 'avg_delay_desc'
+
 const loading = ref(false)
 const tunUpdating = ref(false)
 const installingTunBootstrap = ref(false)
 const savingConfig = ref(false)
 const savingTunSettings = ref(false)
 const bulkRemoving = ref(false)
+const bulkRemovingCandidates = ref(false)
+const bulkValidating = ref(false)
+const bulkRemovingFullFailures = ref(false)
+const bulkRestoringRemoved = ref(false)
+const bulkPurgingSelectedRemoved = ref(false)
+const bulkPurgingRemoved = ref(false)
+const purgingRemovedNodeId = ref<string | null>(null)
 const bulkPromotingGroup = ref<'staging' | 'quarantine' | null>(null)
+const activeSortMode = ref<PoolSortMode>('quality')
+const stagingSortMode = ref<PoolSortMode>('quality')
+const quarantineSortMode = ref<PoolSortMode>('quality')
+const candidateSortMode = ref<PoolSortMode>('last_checked_desc')
+const removedSortMode = ref<'removed_desc' | 'removed_asc' | 'fail_rate_asc' | 'fail_rate_desc' | 'avg_delay_asc' | 'avg_delay_desc'>('removed_desc')
+const fullFailureThreshold = ref(20)
 const isCompact = ref(typeof window !== 'undefined' ? window.innerWidth < 768 : false)
+const selectedCandidateIds = ref<string[]>([])
 const selectedStagingIds = ref<string[]>([])
 const selectedQuarantineIds = ref<string[]>([])
+const selectedRemovedIds = ref<string[]>([])
+const tunRemoteDnsText = ref('')
 const tunProtectDomainsText = ref('')
 const tunProtectCidrsText = ref('')
 
@@ -571,6 +763,7 @@ const configForm = ref<ValidationConfig>({
 const tunSettingsForm = ref<TunEditableSettings>({
   selectionPolicy: 'fastest',
   routeMode: 'strict_proxy',
+  remoteDns: [],
   protectDomains: [],
   protectCidrs: []
 })
@@ -578,11 +771,23 @@ const tunSettingsForm = ref<TunEditableSettings>({
 const nodes = computed(() => dashboard.value.nodes || [])
 const summary = computed<NodePoolSummary>(() => dashboard.value.summary)
 const recentEvents = computed<NodeEvent[]>(() => dashboard.value.recentEvents || [])
-const activeNodes = computed(() => sortNodesByQuality(nodes.value.filter((node) => node.status === 'active')))
-const stagingNodes = computed(() => sortNodesByQuality(nodes.value.filter((node) => node.status === 'staging')))
-const quarantineNodes = computed(() => sortNodesByQuality(nodes.value.filter((node) => node.status === 'quarantine')))
-const candidateNodes = computed(() => nodes.value.filter((node) => node.status === 'candidate'))
-const removedNodes = computed(() => nodes.value.filter((node) => node.status === 'removed'))
+const activeNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'active'), activeSortMode.value))
+const stagingNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'staging'), stagingSortMode.value))
+const quarantineNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'quarantine'), quarantineSortMode.value))
+const candidateNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'candidate'), candidateSortMode.value))
+const removedNodes = computed(() => sortRemovedNodes(nodes.value.filter((node) => node.status === 'removed'), removedSortMode.value))
+const removedFullFailureNodes = computed(() =>
+  removedNodes.value.filter((node) => node.totalPings > 0 && node.failedPings === node.totalPings)
+)
+const fullFailureRemovalCandidates = computed(() =>
+  nodes.value.filter(
+    (node) =>
+      node.status !== 'removed' &&
+      node.totalPings >= fullFailureThreshold.value &&
+      node.totalPings > 0 &&
+      node.failedPings === node.totalPings
+  )
+)
 
 const machineState = computed<MachineState>(() => tunStatus.value.machineState || 'clean')
 const tunBootstrapNeeded = computed(() => Boolean(tunStatus.value.privilegeInstallRecommended))
@@ -639,6 +844,94 @@ const selectionPolicyOptions = computed(() => [
   { label: t('nodePool.selectionPolicyOptions.lowest_latency'), value: 'lowest_latency' as TunSelectionPolicy },
   { label: t('nodePool.selectionPolicyOptions.lowest_fail_rate'), value: 'lowest_fail_rate' as TunSelectionPolicy }
 ])
+
+const removedSortOptions = computed(() => [
+  { label: t('nodePool.removedSortOptions.removed_desc'), value: 'removed_desc' as const },
+  { label: t('nodePool.removedSortOptions.removed_asc'), value: 'removed_asc' as const },
+  { label: t('nodePool.removedSortOptions.fail_rate_asc'), value: 'fail_rate_asc' as const },
+  { label: t('nodePool.removedSortOptions.fail_rate_desc'), value: 'fail_rate_desc' as const },
+  { label: t('nodePool.removedSortOptions.avg_delay_asc'), value: 'avg_delay_asc' as const },
+  { label: t('nodePool.removedSortOptions.avg_delay_desc'), value: 'avg_delay_desc' as const }
+])
+
+const poolSortOptions = computed(() => [
+  { label: t('nodePool.poolSortOptions.quality'), value: 'quality' as const },
+  { label: t('nodePool.poolSortOptions.last_checked_desc'), value: 'last_checked_desc' as const },
+  { label: t('nodePool.poolSortOptions.last_checked_asc'), value: 'last_checked_asc' as const },
+  { label: t('nodePool.poolSortOptions.fail_rate_asc'), value: 'fail_rate_asc' as const },
+  { label: t('nodePool.poolSortOptions.fail_rate_desc'), value: 'fail_rate_desc' as const },
+  { label: t('nodePool.poolSortOptions.avg_delay_asc'), value: 'avg_delay_asc' as const },
+  { label: t('nodePool.poolSortOptions.avg_delay_desc'), value: 'avg_delay_desc' as const }
+])
+
+const poolLifecycleSteps = computed(() => [
+  { status: 'candidate' as NodeStatus, description: t('nodePool.lifecycleGuide.candidate') },
+  { status: 'staging' as NodeStatus, description: t('nodePool.lifecycleGuide.staging') },
+  { status: 'active' as NodeStatus, description: t('nodePool.lifecycleGuide.active') },
+  { status: 'quarantine' as NodeStatus, description: t('nodePool.lifecycleGuide.quarantine') },
+  { status: 'removed' as NodeStatus, description: t('nodePool.lifecycleGuide.removed') }
+])
+
+const validationConfigGuideItems = computed(() => [
+  {
+    key: 'minActiveNodes',
+    label: t('nodePool.minActiveNodes'),
+    description: t('nodePool.validationGuideMinActiveNodes')
+  },
+  {
+    key: 'minSamples',
+    label: t('nodePool.minSamples'),
+    description: t('nodePool.validationGuideMinSamples')
+  },
+  {
+    key: 'maxFailRate',
+    label: t('nodePool.maxFailRate'),
+    description: t('nodePool.validationGuideMaxFailRate')
+  },
+  {
+    key: 'maxAvgDelay',
+    label: t('nodePool.maxAvgDelay'),
+    description: t('nodePool.validationGuideMaxAvgDelay')
+  },
+  {
+    key: 'demoteAfterFails',
+    label: t('nodePool.demoteAfterFails'),
+    description: t('nodePool.validationGuideDemoteAfterFails')
+  },
+  {
+    key: 'probeInterval',
+    label: t('nodePool.probeInterval'),
+    description: t('nodePool.validationGuideProbeInterval')
+  },
+  {
+    key: 'probeUrl',
+    label: t('nodePool.probeUrl'),
+    description: t('nodePool.validationGuideProbeUrl')
+  },
+  {
+    key: 'minBandwidthKbps',
+    label: t('nodePool.minBandwidthKbps'),
+    description: t('nodePool.validationGuideMinBandwidthKbps')
+  },
+  {
+    key: 'autoRemoveDemoted',
+    label: t('nodePool.autoRemoveDemoted'),
+    description: t('nodePool.validationGuideAutoRemoveDemoted')
+  }
+])
+
+const validationPoolHint = computed(() => {
+  const hints: string[] = []
+
+  if (!stagingNodes.value.length && configForm.value.minSamples <= 1) {
+    hints.push(t('nodePool.validationPoolZeroHintFast', { minSamples: configForm.value.minSamples }))
+  }
+  if (candidateNodes.value.length) {
+    hints.push(t('nodePool.validationPoolZeroHintCandidate', { count: candidateNodes.value.length }))
+  }
+
+  return hints.join(' ')
+})
 
 function translateCode(prefix: string, code: string): string {
   const key = `${prefix}.${code}`
@@ -707,6 +1000,12 @@ function checkedAtValue(node: NodeRecord) {
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
+function removedAtValue(node: NodeRecord) {
+  const value = node.statusUpdatedAt || node.lastEventAt || node.addedAt
+  const timestamp = value ? new Date(value).getTime() : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
 function compareNodesByQuality(a: NodeRecord, b: NodeRecord) {
   const failRateDiff = failRateValue(a) - failRateValue(b)
   if (failRateDiff !== 0) return failRateDiff
@@ -725,8 +1024,70 @@ function compareNodesByQuality(a: NodeRecord, b: NodeRecord) {
   return checkedAtValue(b) - checkedAtValue(a)
 }
 
-function sortNodesByQuality(nodes: NodeRecord[]) {
-  return [...nodes].sort(compareNodesByQuality)
+function compareNullableMetric(aValue: number | null, bValue: number | null, direction: 'asc' | 'desc') {
+  if (aValue == null && bValue == null) return 0
+  if (aValue == null) return 1
+  if (bValue == null) return -1
+  return direction === 'asc' ? aValue - bValue : bValue - aValue
+}
+
+function sortPoolNodes(entries: NodeRecord[], mode: PoolSortMode) {
+  return [...entries].sort((a, b) => {
+    switch (mode) {
+      case 'last_checked_desc':
+        return checkedAtValue(b) - checkedAtValue(a)
+      case 'last_checked_asc':
+        return checkedAtValue(a) - checkedAtValue(b)
+      case 'fail_rate_asc': {
+        const diff = compareNullableMetric(a.totalPings ? failRateValue(a) : null, b.totalPings ? failRateValue(b) : null, 'asc')
+        return diff !== 0 ? diff : compareNodesByQuality(a, b)
+      }
+      case 'fail_rate_desc': {
+        const diff = compareNullableMetric(a.totalPings ? failRateValue(a) : null, b.totalPings ? failRateValue(b) : null, 'desc')
+        return diff !== 0 ? diff : compareNodesByQuality(a, b)
+      }
+      case 'avg_delay_asc': {
+        const diff = compareNullableMetric(a.avgDelayMs > 0 ? a.avgDelayMs : null, b.avgDelayMs > 0 ? b.avgDelayMs : null, 'asc')
+        return diff !== 0 ? diff : compareNodesByQuality(a, b)
+      }
+      case 'avg_delay_desc': {
+        const diff = compareNullableMetric(a.avgDelayMs > 0 ? a.avgDelayMs : null, b.avgDelayMs > 0 ? b.avgDelayMs : null, 'desc')
+        return diff !== 0 ? diff : compareNodesByQuality(a, b)
+      }
+      default:
+        return compareNodesByQuality(a, b)
+    }
+  })
+}
+
+function sortRemovedNodes(
+  entries: NodeRecord[],
+  mode: 'removed_desc' | 'removed_asc' | 'fail_rate_asc' | 'fail_rate_desc' | 'avg_delay_asc' | 'avg_delay_desc'
+) {
+  return [...entries].sort((a, b) => {
+    switch (mode) {
+      case 'removed_asc':
+        return removedAtValue(a) - removedAtValue(b)
+      case 'fail_rate_asc': {
+        const diff = compareNullableMetric(a.totalPings ? failRateValue(a) : null, b.totalPings ? failRateValue(b) : null, 'asc')
+        return diff !== 0 ? diff : removedAtValue(b) - removedAtValue(a)
+      }
+      case 'fail_rate_desc': {
+        const diff = compareNullableMetric(a.totalPings ? failRateValue(a) : null, b.totalPings ? failRateValue(b) : null, 'desc')
+        return diff !== 0 ? diff : removedAtValue(b) - removedAtValue(a)
+      }
+      case 'avg_delay_asc': {
+        const diff = compareNullableMetric(a.avgDelayMs > 0 ? a.avgDelayMs : null, b.avgDelayMs > 0 ? b.avgDelayMs : null, 'asc')
+        return diff !== 0 ? diff : removedAtValue(b) - removedAtValue(a)
+      }
+      case 'avg_delay_desc': {
+        const diff = compareNullableMetric(a.avgDelayMs > 0 ? a.avgDelayMs : null, b.avgDelayMs > 0 ? b.avgDelayMs : null, 'desc')
+        return diff !== 0 ? diff : removedAtValue(b) - removedAtValue(a)
+      }
+      default:
+        return removedAtValue(b) - removedAtValue(a)
+    }
+  })
 }
 
 function formatDateTime(value?: string) {
@@ -745,50 +1106,95 @@ function rowKey(row: NodeRecord) {
 }
 
 function syncSelections() {
+  const candidateSet = new Set(candidateNodes.value.map((node) => node.id))
   const stagingSet = new Set(stagingNodes.value.map((node) => node.id))
   const quarantineSet = new Set(quarantineNodes.value.map((node) => node.id))
+  const removedSet = new Set(removedNodes.value.map((node) => node.id))
+  selectedCandidateIds.value = selectedCandidateIds.value.filter((id) => candidateSet.has(id))
   selectedStagingIds.value = selectedStagingIds.value.filter((id) => stagingSet.has(id))
   selectedQuarantineIds.value = selectedQuarantineIds.value.filter((id) => quarantineSet.has(id))
+  selectedRemovedIds.value = selectedRemovedIds.value.filter((id) => removedSet.has(id))
 }
 
-function clearSelection(group: 'staging' | 'quarantine') {
+function clearSelection(group: 'candidate' | 'staging' | 'quarantine' | 'removed') {
+  if (group === 'candidate') {
+    selectedCandidateIds.value = []
+    return
+  }
   if (group === 'staging') {
     selectedStagingIds.value = []
     return
   }
-  selectedQuarantineIds.value = []
+  if (group === 'quarantine') {
+    selectedQuarantineIds.value = []
+    return
+  }
+  selectedRemovedIds.value = []
 }
 
-function handleCheckedRowKeysUpdate(group: 'staging' | 'quarantine', keys: DataTableRowKey[]) {
+function handleCheckedRowKeysUpdate(group: 'candidate' | 'staging' | 'quarantine' | 'removed', keys: DataTableRowKey[]) {
   const ids = keys.map((key) => String(key))
+  if (group === 'candidate') {
+    selectedCandidateIds.value = ids
+    return
+  }
   if (group === 'staging') {
     selectedStagingIds.value = ids
     return
   }
-  selectedQuarantineIds.value = ids
+  if (group === 'quarantine') {
+    selectedQuarantineIds.value = ids
+    return
+  }
+  selectedRemovedIds.value = ids
 }
 
-function isSelected(group: 'staging' | 'quarantine', id: string) {
-  return (group === 'staging' ? selectedStagingIds.value : selectedQuarantineIds.value).includes(id)
+function isSelected(group: 'candidate' | 'staging' | 'quarantine' | 'removed', id: string) {
+  if (group === 'candidate') {
+    return selectedCandidateIds.value.includes(id)
+  }
+  if (group === 'staging') {
+    return selectedStagingIds.value.includes(id)
+  }
+  if (group === 'quarantine') {
+    return selectedQuarantineIds.value.includes(id)
+  }
+  return selectedRemovedIds.value.includes(id)
 }
 
-function setCardSelection(group: 'staging' | 'quarantine', id: string, checked: boolean) {
-  const next = new Set(group === 'staging' ? selectedStagingIds.value : selectedQuarantineIds.value)
+function setCardSelection(group: 'candidate' | 'staging' | 'quarantine' | 'removed', id: string, checked: boolean) {
+  const source =
+    group === 'candidate'
+      ? selectedCandidateIds.value
+      : group === 'staging'
+        ? selectedStagingIds.value
+        : group === 'quarantine'
+          ? selectedQuarantineIds.value
+          : selectedRemovedIds.value
+  const next = new Set(source)
   if (checked) {
     next.add(id)
   } else {
     next.delete(id)
   }
+  if (group === 'candidate') {
+    selectedCandidateIds.value = Array.from(next)
+    return
+  }
   if (group === 'staging') {
     selectedStagingIds.value = Array.from(next)
     return
   }
-  selectedQuarantineIds.value = Array.from(next)
+  if (group === 'quarantine') {
+    selectedQuarantineIds.value = Array.from(next)
+    return
+  }
+  selectedRemovedIds.value = Array.from(next)
 }
 
 function createColumns(group: 'candidate' | 'staging' | 'active' | 'quarantine' | 'removed'): DataTableColumns<NodeRecord> {
   const columns: DataTableColumns<NodeRecord> = [
-    ...(group === 'staging' || group === 'quarantine'
+    ...(group === 'candidate' || group === 'staging' || group === 'quarantine' || group === 'removed'
       ? [
           {
             type: 'selection'
@@ -839,23 +1245,69 @@ function createColumns(group: 'candidate' | 'staging' | 'active' | 'quarantine' 
       render: (row) => failRateLabel(row)
     },
     {
-      title: () => t('nodePool.lastCheckedAt'),
+      title: () => t(group === 'removed' ? 'nodePool.removedAt' : 'nodePool.lastCheckedAt'),
       key: 'lastCheckedAt',
       width: 180,
-      render: (row) => formatDateTime(row.lastCheckedAt || row.statusUpdatedAt || row.addedAt) || '-'
+      render: (row) =>
+        formatDateTime(group === 'removed' ? row.statusUpdatedAt || row.lastEventAt || row.addedAt : row.lastCheckedAt || row.statusUpdatedAt || row.addedAt) || '-'
     }
   ]
-
-  if (group === 'removed') {
-    return columns
-  }
 
   columns.push({
     title: () => t('common.actions'),
     key: 'actions',
-    width: group === 'candidate' ? 110 : 220,
+    width: group === 'removed' ? 260 : 220,
     render: (row) => {
       const actions: any[] = []
+
+      if (group === 'removed') {
+        actions.push(
+          h(
+            NPopconfirm,
+            { onPositiveClick: () => handleRestore(row.id) },
+            {
+              trigger: () => h(NButton, { size: 'small', type: 'primary' }, { default: () => t('nodePool.restoreNode') }),
+              default: () => t('nodePool.restoreConfirm')
+            }
+          )
+        )
+
+        actions.push(
+          h(
+            NPopconfirm,
+            { onPositiveClick: () => handlePurgeRemoved(row.id) },
+            {
+              trigger: () =>
+                h(
+                  NButton,
+                  {
+                    size: 'small',
+                    type: 'error',
+                    secondary: true,
+                    loading: purgingRemovedNodeId.value === row.id
+                  },
+                  { default: () => t('nodePool.purgeRemovedNode') }
+                ),
+              default: () => t('nodePool.purgeRemovedConfirm')
+            }
+          )
+        )
+
+        return h(NSpace, { size: 'small' }, { default: () => actions })
+      }
+
+      if (group === 'candidate') {
+        actions.push(
+          h(
+            NPopconfirm,
+            { onPositiveClick: () => handleValidate(row.id) },
+            {
+              trigger: () => h(NButton, { size: 'small', type: 'primary' }, { default: () => t('nodePool.validate') }),
+              default: () => t('nodePool.validateConfirm')
+            }
+          )
+        )
+      }
 
       if (group === 'staging' || group === 'quarantine') {
         actions.push(
@@ -930,6 +1382,7 @@ function normalizeListInput(value: string) {
 }
 
 function syncTunSettingsTextAreas() {
+  tunRemoteDnsText.value = (tunSettingsForm.value.remoteDns || []).join('\n')
   tunProtectDomainsText.value = (tunSettingsForm.value.protectDomains || []).join('\n')
   tunProtectCidrsText.value = (tunSettingsForm.value.protectCidrs || []).join('\n')
 }
@@ -939,6 +1392,7 @@ async function fetchTunSettings() {
   tunSettingsForm.value = {
     selectionPolicy: data.selectionPolicy || 'fastest',
     routeMode: data.routeMode || 'strict_proxy',
+    remoteDns: Array.isArray(data.remoteDns) ? data.remoteDns : [],
     protectDomains: Array.isArray(data.protectDomains) ? data.protectDomains : [],
     protectCidrs: Array.isArray(data.protectCidrs) ? data.protectCidrs : []
   }
@@ -1026,6 +1480,16 @@ async function handlePromote(id: string) {
   }
 }
 
+async function handleValidate(id: string) {
+  try {
+    await nodePoolAPI.validate(id)
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  }
+}
+
 async function handleQuarantine(id: string) {
   try {
     await nodePoolAPI.quarantine(id)
@@ -1043,6 +1507,114 @@ async function handleRemove(id: string) {
     await refreshAll()
   } catch (err: any) {
     message.error(err?.message || err?.error || t('common.error'))
+  }
+}
+
+async function handleRestore(id: string) {
+  try {
+    await nodePoolAPI.restore(id)
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  }
+}
+
+async function handleBulkValidateCandidate() {
+  if (!selectedCandidateIds.value.length) return
+
+  bulkValidating.value = true
+  try {
+    await nodePoolAPI.bulkValidate({ ids: selectedCandidateIds.value })
+    clearSelection('candidate')
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    bulkValidating.value = false
+  }
+}
+
+async function handleBulkRemoveCandidate() {
+  const ids = [...selectedCandidateIds.value]
+  if (!ids.length) return
+
+  bulkRemovingCandidates.value = true
+  try {
+    await nodePoolAPI.bulkRemove({ ids })
+    clearSelection('candidate')
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    bulkRemovingCandidates.value = false
+  }
+}
+
+async function handleBulkRestoreRemoved() {
+  if (!selectedRemovedIds.value.length) return
+
+  bulkRestoringRemoved.value = true
+  try {
+    await nodePoolAPI.bulkRestore({ ids: selectedRemovedIds.value })
+    clearSelection('removed')
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    bulkRestoringRemoved.value = false
+  }
+}
+
+async function handleBulkPurgeSelectedRemoved() {
+  const ids = [...selectedRemovedIds.value]
+  if (!ids.length) return
+
+  bulkPurgingSelectedRemoved.value = true
+  try {
+    await nodePoolAPI.bulkPurgeRemoved({ ids })
+    clearSelection('removed')
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    bulkPurgingSelectedRemoved.value = false
+  }
+}
+
+async function handlePurgeRemoved(id: string) {
+  purgingRemovedNodeId.value = id
+  try {
+    await nodePoolAPI.bulkPurgeRemoved({ ids: [id] })
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    if (purgingRemovedNodeId.value === id) {
+      purgingRemovedNodeId.value = null
+    }
+  }
+}
+
+async function handleBulkPurgeRemovedFullFailures() {
+  const ids = removedFullFailureNodes.value.map((node) => node.id)
+  if (!ids.length) return
+
+  bulkPurgingRemoved.value = true
+  try {
+    await nodePoolAPI.bulkPurgeRemoved({ ids })
+    clearSelection('removed')
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    bulkPurgingRemoved.value = false
   }
 }
 
@@ -1076,6 +1648,25 @@ async function handleBulkRemoveQuarantine() {
   }
 }
 
+async function handleBulkRemoveFullFailures() {
+  const ids = fullFailureRemovalCandidates.value.map((node) => node.id)
+  if (!ids.length) return
+
+  bulkRemovingFullFailures.value = true
+  try {
+    await nodePoolAPI.bulkRemove({ ids })
+    clearSelection('candidate')
+    clearSelection('staging')
+    clearSelection('quarantine')
+    message.success(t('common.success'))
+    await refreshAll()
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    bulkRemovingFullFailures.value = false
+  }
+}
+
 async function handleSaveConfig() {
   savingConfig.value = true
   try {
@@ -1095,12 +1686,14 @@ async function handleSaveTunSettings() {
     const saved = await tunAPI.updateSettings({
       selectionPolicy: tunSettingsForm.value.selectionPolicy,
       routeMode: tunSettingsForm.value.routeMode,
+      remoteDns: normalizeListInput(tunRemoteDnsText.value),
       protectDomains: normalizeListInput(tunProtectDomainsText.value),
       protectCidrs: normalizeListInput(tunProtectCidrsText.value)
     })
     tunSettingsForm.value = {
       selectionPolicy: saved.selectionPolicy || 'fastest',
       routeMode: saved.routeMode || 'strict_proxy',
+      remoteDns: Array.isArray(saved.remoteDns) ? saved.remoteDns : [],
       protectDomains: Array.isArray(saved.protectDomains) ? saved.protectDomains : [],
       protectCidrs: Array.isArray(saved.protectCidrs) ? saved.protectCidrs : []
     }
@@ -1151,6 +1744,63 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
 }
 
+.removed-toolbar {
+  margin-bottom: 12px;
+}
+
+.pool-sort-select {
+  min-width: 220px;
+}
+
+.validation-config-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+  align-items: start;
+}
+
+.validation-config-form {
+  min-width: 0;
+}
+
+.validation-config-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 10px;
+  background: var(--n-color);
+}
+
+.validation-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.validation-guide-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--n-border-color);
+}
+
+.validation-guide-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.validation-guide-footnote {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--n-color-target, #2080f0) 8%, transparent);
+  color: var(--n-text-color-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .node-pool-meta {
   color: var(--n-text-color-3);
   font-size: 13px;
@@ -1160,6 +1810,28 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pool-guide-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.pool-guide-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 10px;
+  background: var(--n-color);
+}
+
+.pool-guide-desc {
+  color: var(--n-text-color-2);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .summary-item {
@@ -1239,10 +1911,22 @@ onBeforeUnmount(() => {
   .summary-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .pool-guide-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .validation-config-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 767px) {
   .summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .pool-guide-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1251,6 +1935,10 @@ onBeforeUnmount(() => {
   }
 
   .machine-actions :deep(button) {
+    width: 100%;
+  }
+
+  .pool-sort-select {
     width: 100%;
   }
 

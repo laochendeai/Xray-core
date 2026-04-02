@@ -80,6 +80,20 @@ export interface BackupInfo {
   modified: string
 }
 
+export type SubscriptionSourceType = 'url' | 'manual' | 'file'
+
+export interface SubscriptionRecord {
+  id: string
+  sourceType: SubscriptionSourceType
+  url?: string
+  sourceName?: string
+  remark: string
+  autoRefresh: boolean
+  refreshIntervalMin: number
+  lastRefresh?: string
+  nodeCount: number
+}
+
 export type NodeStatus = 'candidate' | 'staging' | 'active' | 'quarantine' | 'removed'
 export type TransitionReason =
   | 'subscription_node_discovered'
@@ -87,7 +101,9 @@ export type TransitionReason =
   | 'probe_qualified'
   | 'probe_requalified'
   | 'probe_failures_exceeded'
+  | 'manual_validate'
   | 'manual_promote'
+  | 'manual_restore'
   | 'manual_quarantine'
   | 'manual_remove'
   | 'subscription_missing'
@@ -227,6 +243,7 @@ export type TunRouteMode = 'strict_proxy' | 'auto_tested'
 export interface TunEditableSettings {
   selectionPolicy: TunSelectionPolicy
   routeMode: TunRouteMode
+  remoteDns: string[]
   protectDomains: string[]
   protectCidrs: string[]
 }

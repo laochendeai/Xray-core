@@ -611,6 +611,49 @@ func TestTunManagerEditableSettingsNormalizesWildcardProtectDomainsFromConfig(t 
 	}
 }
 
+func TestTunManagerEditableSettingsPersistRemoteDNS(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "webpanel": {
+    "tun": {}
+  }
+}
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tunManager, err := NewTunManager(configPath)
+	if err != nil {
+		t.Fatalf("new tun manager: %v", err)
+	}
+
+	settings, err := tunManager.UpdateEditableSettings(TunEditableSettings{
+		SelectionPolicy: string(TunSelectionPolicyFastest),
+		RouteMode:       string(TunRouteModeStrictProxy),
+		RemoteDNS:       []string{"1.1.1.1", "8.8.8.8", "1.1.1.1"},
+	})
+	if err != nil {
+		t.Fatalf("update editable settings: %v", err)
+	}
+
+	if !reflect.DeepEqual(settings.RemoteDNS, []string{"1.1.1.1", "8.8.8.8"}) {
+		t.Fatalf("unexpected remote dns list: %v", settings.RemoteDNS)
+	}
+
+	loaded, err := tunManager.EditableSettings()
+	if err != nil {
+		t.Fatalf("reload editable settings: %v", err)
+	}
+	if !reflect.DeepEqual(loaded.RemoteDNS, settings.RemoteDNS) {
+		t.Fatalf("expected remote dns to persist, got %v", loaded.RemoteDNS)
+	}
+}
+
 func TestBuildTunRuntimeConfigEnablesSniffingAndCnDirectRulesWhenAssetsExist(t *testing.T) {
 	t.Parallel()
 

@@ -68,6 +68,9 @@ func (wp *WebPanel) addSubscriptionHandler(w http.ResponseWriter, r *http.Reques
 
 	var req struct {
 		URL             string `json:"url"`
+		Content         string `json:"content"`
+		SourceName      string `json:"sourceName"`
+		SourceType      string `json:"sourceType"`
 		Remark          string `json:"remark"`
 		AutoRefresh     bool   `json:"autoRefresh"`
 		RefreshInterval int    `json:"refreshIntervalMin"`
@@ -77,12 +80,20 @@ func (wp *WebPanel) addSubscriptionHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if req.URL == "" {
-		writeError(w, http.StatusBadRequest, "URL is required")
+	if req.URL == "" && req.Content == "" {
+		writeError(w, http.StatusBadRequest, "URL or content is required")
 		return
 	}
 
-	sub, err := wp.subManager.AddSubscription(req.URL, req.Remark, req.AutoRefresh, req.RefreshInterval)
+	sub, err := wp.subManager.AddSubscription(SubscriptionInput{
+		URL:             req.URL,
+		Content:         req.Content,
+		SourceName:      req.SourceName,
+		SourceType:      SubscriptionSourceType(req.SourceType),
+		Remark:          req.Remark,
+		AutoRefresh:     req.AutoRefresh,
+		RefreshInterval: req.RefreshInterval,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -161,6 +172,26 @@ func (wp *WebPanel) handleNodePoolByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasPrefix(path, "bulk-promote") {
+		wp.handleNodePoolBulkPromote(w, r)
+		return
+	}
+
+	if strings.HasPrefix(path, "bulk-validate") {
+		wp.handleNodePoolBulkValidate(w, r)
+		return
+	}
+
+	if strings.HasPrefix(path, "bulk-restore") {
+		wp.handleNodePoolBulkRestore(w, r)
+		return
+	}
+
+	if strings.HasPrefix(path, "bulk-purge-removed") {
+		wp.handleNodePoolBulkPurgeRemoved(w, r)
+		return
+	}
+
 	if strings.HasPrefix(path, "bulk-remove") {
 		wp.handleNodePoolBulkRemove(w, r)
 		return
@@ -187,6 +218,12 @@ func (wp *WebPanel) handleNodePoolByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		switch action {
+		case "validate":
+			if err := wp.subManager.ValidateNode(id); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"message": "Node moved to validation successfully"})
 		case "promote":
 			if err := wp.subManager.PromoteNode(id); err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
@@ -211,6 +248,12 @@ func (wp *WebPanel) handleNodePoolByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeJSON(w, http.StatusOK, map[string]string{"message": "Node removed successfully"})
+		case "restore":
+			if err := wp.subManager.RestoreNode(id); err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"message": "Node moved to candidate successfully"})
 		default:
 			writeError(w, http.StatusBadRequest, "unknown action: "+action)
 		}
@@ -279,5 +322,133 @@ func (wp *WebPanel) handleNodePoolBulkRemove(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":      "Bulk remove completed",
 		"removedCount": count,
+	})
+}
+
+func (wp *WebPanel) handleNodePoolBulkPromote(w http.ResponseWriter, r *http.Request) {
+	if wp.subManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "subscription manager not initialized")
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req BulkPromoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one node ID is required")
+		return
+	}
+
+	count, err := wp.subManager.BulkPromote(req.IDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":       "Bulk promote completed",
+		"promotedCount": count,
+	})
+}
+
+func (wp *WebPanel) handleNodePoolBulkValidate(w http.ResponseWriter, r *http.Request) {
+	if wp.subManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "subscription manager not initialized")
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req BulkValidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one node ID is required")
+		return
+	}
+
+	count, err := wp.subManager.BulkValidate(req.IDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":        "Bulk validate completed",
+		"validatedCount": count,
+	})
+}
+
+func (wp *WebPanel) handleNodePoolBulkRestore(w http.ResponseWriter, r *http.Request) {
+	if wp.subManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "subscription manager not initialized")
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req BulkRestoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one node ID is required")
+		return
+	}
+
+	count, err := wp.subManager.BulkRestore(req.IDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":       "Bulk restore completed",
+		"restoredCount": count,
+	})
+}
+
+func (wp *WebPanel) handleNodePoolBulkPurgeRemoved(w http.ResponseWriter, r *http.Request) {
+	if wp.subManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "subscription manager not initialized")
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req BulkPurgeRemovedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one node ID is required")
+		return
+	}
+
+	count, err := wp.subManager.BulkPurgeRemoved(req.IDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":     "Bulk purge removed completed",
+		"purgedCount": count,
 	})
 }

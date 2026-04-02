@@ -1,11 +1,39 @@
 <template>
-  <n-space vertical :size="16">
+  <n-space vertical :size="16" class="dns-page">
     <h2>{{ t('dns.title') }}</h2>
+    <n-alert type="info" :title="t('dns.runtimeSplitTitle')">
+      {{ t('dns.runtimeSplitBody') }}
+    </n-alert>
     <n-alert type="info">
-      DNS configuration is managed through the config file. Edit the "dns" section in the Config page.
+      {{ t('dns.remoteDnsControlHint') }}
     </n-alert>
 
-    <n-card :title="t('dns.title')" size="small">
+    <n-card :title="t('dns.runtimeSplitTitle')" size="small">
+      <div class="dns-flow-grid">
+        <div class="dns-flow-item">
+          <strong>{{ t('dns.flowCnTitle') }}</strong>
+          <div class="dns-flow-desc">{{ t('dns.flowCnBody') }}</div>
+          <div class="dns-flow-meta">{{ t('dns.resolversLabel') }}: {{ chinaResolversDisplay }}</div>
+        </div>
+        <div class="dns-flow-item">
+          <strong>{{ t('dns.flowRemoteTitle') }}</strong>
+          <div class="dns-flow-desc">{{ t('dns.flowRemoteBody') }}</div>
+          <div class="dns-flow-meta">{{ t('dns.resolversLabel') }}: {{ remoteResolversDisplay }}</div>
+        </div>
+        <div class="dns-flow-item">
+          <strong>{{ t('dns.flowBaseConfigTitle') }}</strong>
+          <div class="dns-flow-desc">{{ t('dns.flowBaseConfigBody') }}</div>
+          <div class="dns-flow-meta">
+            {{ tunStatus?.running ? t('dns.runtimeStatusRunning') : t('dns.runtimeStatusStopped') }}
+          </div>
+        </div>
+      </div>
+    </n-card>
+
+    <n-card :title="t('dns.baseConfigTitle')" size="small">
+      <n-alert type="warning" class="dns-config-alert">
+        {{ t('dns.baseConfigHint') }}
+      </n-alert>
       <template v-if="dnsConfig">
         <n-descriptions bordered :column="1">
           <n-descriptions-item v-if="dnsConfig.clientIp" :label="t('dns.clientIp')">
@@ -27,7 +55,7 @@
           <n-data-table :columns="hostColumns" :data="hostEntries" size="small" />
         </template>
       </template>
-      <n-empty v-else description="DNS config not loaded. Check Config page." />
+      <n-empty v-else :description="t('dns.notLoaded')" />
     </n-card>
   </n-space>
 </template>
@@ -36,12 +64,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { NSpace, NCard, NAlert, NDescriptions, NDescriptionsItem, NDivider, NDataTable, NEmpty, useMessage, type DataTableColumns } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { configAPI } from '@/api/client'
+import { configAPI, tunAPI } from '@/api/client'
 
 const { t } = useI18n()
 const message = useMessage()
 
 const dnsConfig = ref<any>(null)
+const tunStatus = ref<any>(null)
+const defaultChinaResolvers = ['223.5.5.5', '119.29.29.29']
+const defaultRemoteResolvers = ['1.1.1.1', '8.8.8.8']
 
 const dnsServers = computed(() => {
   if (!dnsConfig.value?.servers) return []
@@ -60,16 +91,24 @@ const hostEntries = computed(() => {
   }))
 })
 
+const chinaResolversDisplay = computed(() => defaultChinaResolvers.join(', '))
+const remoteResolversDisplay = computed(() => {
+  const resolvers = Array.isArray(tunStatus.value?.remoteDns) && tunStatus.value.remoteDns.length
+    ? tunStatus.value.remoteDns
+    : defaultRemoteResolvers
+  return resolvers.join(', ')
+})
+
 const serverColumns: DataTableColumns = [
   { title: '#', key: 'index', width: 40 },
-  { title: 'Address', key: 'address' },
-  { title: 'Domains', key: 'domains', render: (row: any) => row.domains ? row.domains.join(', ') : '-' },
+  { title: t('dns.address'), key: 'address' },
+  { title: t('dns.domains'), key: 'domains', render: (row: any) => row.domains ? row.domains.join(', ') : '-' },
   { title: t('dns.queryStrategy'), key: 'queryStrategy', render: (row: any) => row.queryStrategy || '-' }
 ]
 
 const hostColumns: DataTableColumns = [
-  { title: 'Domain', key: 'domain' },
-  { title: 'Target', key: 'target' }
+  { title: t('dns.domain'), key: 'domain' },
+  { title: t('dns.target'), key: 'target' }
 ]
 
 async function loadDNSConfig() {
@@ -80,9 +119,62 @@ async function loadDNSConfig() {
       dnsConfig.value = config.dns || null
     }
   } catch (err: any) {
-    message.error('Failed to load DNS config')
+    message.error(t('dns.loadFailed'))
   }
 }
 
-onMounted(loadDNSConfig)
+async function loadTunStatus() {
+  try {
+    tunStatus.value = await tunAPI.status()
+  } catch {
+    tunStatus.value = null
+  }
+}
+
+onMounted(() => {
+  loadDNSConfig()
+  loadTunStatus()
+})
 </script>
+
+<style scoped>
+.dns-page h2 {
+  margin: 0;
+}
+
+.dns-flow-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dns-flow-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--n-border-color);
+  border-radius: 10px;
+  background: var(--n-color);
+}
+
+.dns-flow-desc {
+  color: var(--n-text-color-2);
+  line-height: 1.6;
+}
+
+.dns-flow-meta {
+  color: var(--n-text-color-3);
+  font-size: 13px;
+}
+
+.dns-config-alert {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 900px) {
+  .dns-flow-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

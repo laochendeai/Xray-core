@@ -1,5 +1,11 @@
 import axios from 'axios'
-import type { NodePoolDashboardResponse, TunEditableSettings, TunStatusResponse, ValidationConfig } from './types'
+import type {
+  NodePoolDashboardResponse,
+  SubscriptionSourceType,
+  TunEditableSettings,
+  TunStatusResponse,
+  ValidationConfig
+} from './types'
 
 const apiClient = axios.create({
   baseURL: '/api/v1',
@@ -107,7 +113,15 @@ export const shareAPI = {
 
 export const subscriptionAPI = {
   list: () => apiClient.get('/subscriptions') as Promise<any>,
-  add: (data: { url: string; remark: string; autoRefresh: boolean; refreshIntervalMin: number }) =>
+  add: (data: {
+    url?: string
+    content?: string
+    sourceName?: string
+    sourceType?: SubscriptionSourceType
+    remark: string
+    autoRefresh: boolean
+    refreshIntervalMin: number
+  }) =>
     apiClient.post('/subscriptions', data) as Promise<any>,
   delete: (id: string) => apiClient.delete(`/subscriptions/${id}`) as Promise<any>,
   refresh: (id: string) => apiClient.post(`/subscriptions/${id}/refresh`) as Promise<any>
@@ -116,11 +130,16 @@ export const subscriptionAPI = {
 export const nodePoolAPI = {
   list: (status?: string) =>
     apiClient.get('/node-pool', { params: status ? { status } : {} }) as Promise<NodePoolDashboardResponse>,
+  validate: (id: string) => apiClient.post(`/node-pool/${id}/validate`) as Promise<any>,
+  bulkValidate: (payload: { ids: string[] }) => apiClient.post('/node-pool/bulk-validate', payload) as Promise<any>,
   promote: (id: string) => apiClient.post(`/node-pool/${id}/promote`) as Promise<any>,
   bulkPromote: (payload: { ids: string[] }) => apiClient.post('/node-pool/bulk-promote', payload) as Promise<any>,
+  bulkRestore: (payload: { ids: string[] }) => apiClient.post('/node-pool/bulk-restore', payload) as Promise<any>,
+  bulkPurgeRemoved: (payload: { ids: string[] }) => apiClient.post('/node-pool/bulk-purge-removed', payload) as Promise<any>,
   quarantine: (id: string) => apiClient.post(`/node-pool/${id}/quarantine`) as Promise<any>,
   demote: (id: string) => apiClient.post(`/node-pool/${id}/demote`) as Promise<any>,
   remove: (id: string) => apiClient.post(`/node-pool/${id}/remove`) as Promise<any>,
+  restore: (id: string) => apiClient.post(`/node-pool/${id}/restore`) as Promise<any>,
   bulkRemove: (payload: { ids?: string[]; statuses?: string[]; cleanliness?: string[]; onlyUnstable?: boolean }) =>
     apiClient.post('/node-pool/bulk-remove', payload) as Promise<any>,
   delete: (id: string) => apiClient.delete(`/node-pool/${id}`) as Promise<any>,

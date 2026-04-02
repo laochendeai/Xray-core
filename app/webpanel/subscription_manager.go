@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,7 +38,9 @@ const (
 	TransitionReasonProbeQualified             TransitionReason = "probe_qualified"
 	TransitionReasonProbeRequalified           TransitionReason = "probe_requalified"
 	TransitionReasonProbeFailuresExceeded      TransitionReason = "probe_failures_exceeded"
+	TransitionReasonManualValidate             TransitionReason = "manual_validate"
 	TransitionReasonManualPromote              TransitionReason = "manual_promote"
+	TransitionReasonManualRestore              TransitionReason = "manual_restore"
 	TransitionReasonManualQuarantine           TransitionReason = "manual_quarantine"
 	TransitionReasonManualRemove               TransitionReason = "manual_remove"
 	TransitionReasonSubscriptionMissing        TransitionReason = "subscription_missing"
@@ -114,6 +117,30 @@ type BulkRemoveFilter struct {
 	OnlyUnstable bool                `json:"onlyUnstable,omitempty"`
 }
 
+type BulkPromoteRequest struct {
+	IDs []string `json:"ids,omitempty"`
+}
+
+type BulkValidateRequest struct {
+	IDs []string `json:"ids,omitempty"`
+}
+
+type BulkPurgeRemovedRequest struct {
+	IDs []string `json:"ids,omitempty"`
+}
+
+type BulkRestoreRequest struct {
+	IDs []string `json:"ids,omitempty"`
+}
+
+type SubscriptionSourceType string
+
+const (
+	SubscriptionSourceURL    SubscriptionSourceType = "url"
+	SubscriptionSourceManual SubscriptionSourceType = "manual"
+	SubscriptionSourceFile   SubscriptionSourceType = "file"
+)
+
 // NodePoolState is the top-level persisted state.
 type NodePoolState struct {
 	Subscriptions    []SubscriptionRecord `json:"subscriptions"`
@@ -124,13 +151,26 @@ type NodePoolState struct {
 
 // SubscriptionRecord represents a subscription source.
 type SubscriptionRecord struct {
-	ID              string     `json:"id"`
-	URL             string     `json:"url"`
-	Remark          string     `json:"remark"`
-	AutoRefresh     bool       `json:"autoRefresh"`
-	RefreshInterval int        `json:"refreshIntervalMin"`
-	LastRefresh     *time.Time `json:"lastRefresh,omitempty"`
-	NodeCount       int        `json:"nodeCount"`
+	ID              string                 `json:"id"`
+	SourceType      SubscriptionSourceType `json:"sourceType,omitempty"`
+	URL             string                 `json:"url,omitempty"`
+	Content         string                 `json:"content,omitempty"`
+	SourceName      string                 `json:"sourceName,omitempty"`
+	Remark          string                 `json:"remark"`
+	AutoRefresh     bool                   `json:"autoRefresh"`
+	RefreshInterval int                    `json:"refreshIntervalMin"`
+	LastRefresh     *time.Time             `json:"lastRefresh,omitempty"`
+	NodeCount       int                    `json:"nodeCount"`
+}
+
+type SubscriptionInput struct {
+	URL             string
+	Content         string
+	SourceName      string
+	SourceType      SubscriptionSourceType
+	Remark          string
+	AutoRefresh     bool
+	RefreshInterval int
 }
 
 // NodeRecord represents a node in the pool.
@@ -310,9 +350,11 @@ func (sm *SubscriptionManager) ListSubscriptions() []SubscriptionRecord {
 	result := make([]SubscriptionRecord, len(sm.state.Subscriptions))
 	copy(result, sm.state.Subscriptions)
 	for i := range result {
+		result[i].SourceType = normalizeSubscriptionSourceType(result[i].SourceType)
+		result[i].Content = ""
 		count := 0
 		for _, n := range sm.state.Nodes {
-			if n.SubscriptionID == result[i].ID && n.Status != NodeStatusRemoved {
+			if n.SubscriptionID == result[i].ID && isCountedSubscriptionNode(n) {
 				count++
 			}
 		}
@@ -322,33 +364,26 @@ func (sm *SubscriptionManager) ListSubscriptions() []SubscriptionRecord {
 }
 
 // AddSubscription adds a new subscription and immediately fetches it.
-func (sm *SubscriptionManager) AddSubscription(urlStr, remark string, autoRefresh bool, refreshIntervalMin int) (*SubscriptionRecord, error) {
-	id := hashID(urlStr)
+func (sm *SubscriptionManager) AddSubscription(input SubscriptionInput) (*SubscriptionRecord, error) {
+	rec, err := buildSubscriptionRecord(input)
+	if err != nil {
+		return nil, err
+	}
 
 	sm.mu.Lock()
 	for _, s := range sm.state.Subscriptions {
-		if s.ID == id {
+		if s.ID == rec.ID {
 			sm.mu.Unlock()
 			return nil, fmt.Errorf("subscription already exists")
 		}
-	}
-	if refreshIntervalMin <= 0 {
-		refreshIntervalMin = 60
-	}
-	rec := SubscriptionRecord{
-		ID:              id,
-		URL:             urlStr,
-		Remark:          remark,
-		AutoRefresh:     autoRefresh,
-		RefreshInterval: refreshIntervalMin,
 	}
 	sm.state.Subscriptions = append(sm.state.Subscriptions, rec)
 	sm.writeStateLocked()
 	sm.mu.Unlock()
 
-	if err := sm.refreshSubscription(id); err != nil {
+	if err := sm.refreshSubscription(rec.ID); err != nil {
 		sm.mu.Lock()
-		sm.removeSubscriptionLocked(id)
+		sm.removeSubscriptionLocked(rec.ID)
 		sm.writeStateLocked()
 		sm.mu.Unlock()
 		return nil, fmt.Errorf("failed to fetch subscription: %w", err)
@@ -357,8 +392,9 @@ func (sm *SubscriptionManager) AddSubscription(urlStr, remark string, autoRefres
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	for _, s := range sm.state.Subscriptions {
-		if s.ID == id {
+		if s.ID == rec.ID {
 			copyRec := s
+			copyRec.Content = ""
 			return &copyRec, nil
 		}
 	}
@@ -502,6 +538,99 @@ func (sm *SubscriptionManager) PromoteNode(id string) error {
 	return fmt.Errorf("node not found")
 }
 
+func (sm *SubscriptionManager) ValidateNode(id string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for i, n := range sm.state.Nodes {
+		if n.ID != id {
+			continue
+		}
+		if n.Status != NodeStatusCandidate {
+			return fmt.Errorf("node is not in candidate status")
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusStaging, TransitionReasonManualValidate, EventActorOperator, "manual move to validation"); err != nil {
+			return err
+		}
+		sm.writeStateLocked()
+		go sm.emitPoolHealth()
+		return nil
+	}
+	return fmt.Errorf("node not found")
+}
+
+func (sm *SubscriptionManager) BulkPromote(ids []string) (int, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	idSet := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		idSet[id] = struct{}{}
+	}
+
+	promoted := 0
+	for i := range sm.state.Nodes {
+		node := sm.state.Nodes[i]
+		if _, ok := idSet[node.ID]; !ok {
+			continue
+		}
+		if node.Status != NodeStatusStaging && node.Status != NodeStatusQuarantine {
+			continue
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusActive, TransitionReasonManualPromote, EventActorOperator, "bulk promote"); err != nil {
+			return promoted, err
+		}
+		promoted++
+	}
+
+	if promoted == 0 {
+		return 0, nil
+	}
+
+	sm.writeStateLocked()
+	go sm.emitPoolHealth()
+	return promoted, nil
+}
+
+func (sm *SubscriptionManager) BulkValidate(ids []string) (int, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	idSet := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		idSet[id] = struct{}{}
+	}
+
+	validated := 0
+	for i := range sm.state.Nodes {
+		node := sm.state.Nodes[i]
+		if _, ok := idSet[node.ID]; !ok {
+			continue
+		}
+		if node.Status != NodeStatusCandidate {
+			continue
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusStaging, TransitionReasonManualValidate, EventActorOperator, "bulk move to validation"); err != nil {
+			return validated, err
+		}
+		validated++
+	}
+
+	if validated == 0 {
+		return 0, nil
+	}
+
+	sm.writeStateLocked()
+	go sm.emitPoolHealth()
+	return validated, nil
+}
+
 // DemoteNode keeps backward compatibility with the old API and now quarantines the node.
 func (sm *SubscriptionManager) DemoteNode(id string) error {
 	return sm.QuarantineNode(id)
@@ -553,6 +682,100 @@ func (sm *SubscriptionManager) RemoveNode(id string) error {
 		return nil
 	}
 	return fmt.Errorf("node not found")
+}
+
+func (sm *SubscriptionManager) RestoreNode(id string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	for i, n := range sm.state.Nodes {
+		if n.ID != id {
+			continue
+		}
+		if n.Status != NodeStatusRemoved {
+			return fmt.Errorf("node is not in removed status")
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusCandidate, TransitionReasonManualRestore, EventActorOperator, "manual restore to candidate"); err != nil {
+			return err
+		}
+		sm.writeStateLocked()
+		go sm.emitPoolHealth()
+		return nil
+	}
+	return fmt.Errorf("node not found")
+}
+
+func (sm *SubscriptionManager) BulkRestore(ids []string) (int, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	idSet := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		idSet[id] = struct{}{}
+	}
+
+	restored := 0
+	for i := range sm.state.Nodes {
+		node := sm.state.Nodes[i]
+		if _, ok := idSet[node.ID]; !ok {
+			continue
+		}
+		if node.Status != NodeStatusRemoved {
+			continue
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusCandidate, TransitionReasonManualRestore, EventActorOperator, "bulk restore to candidate"); err != nil {
+			return restored, err
+		}
+		restored++
+	}
+
+	if restored == 0 {
+		return 0, nil
+	}
+
+	sm.writeStateLocked()
+	go sm.emitPoolHealth()
+	return restored, nil
+}
+
+func (sm *SubscriptionManager) BulkPurgeRemoved(ids []string) (int, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	idSet := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		idSet[id] = struct{}{}
+	}
+
+	if len(idSet) == 0 {
+		return 0, nil
+	}
+
+	kept := sm.state.Nodes[:0]
+	purged := 0
+	for _, node := range sm.state.Nodes {
+		if _, ok := idSet[node.ID]; !ok || node.Status != NodeStatusRemoved {
+			kept = append(kept, node)
+			continue
+		}
+		purged++
+		errors.LogInfo(context.Background(), "node pool: purged removed node record ", node.Remark, " (", node.ID, ")")
+	}
+	sm.state.Nodes = kept
+
+	if purged == 0 {
+		return 0, nil
+	}
+
+	sm.writeStateLocked()
+	go sm.emitPoolHealth()
+	return purged, nil
 }
 
 func (sm *SubscriptionManager) BulkRemove(filter BulkRemoveFilter) (int, error) {
@@ -630,19 +853,12 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 		return fmt.Errorf("subscription not found")
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(sub.URL)
+	content, err := sm.loadSubscriptionContent(sub)
 	if err != nil {
-		return fmt.Errorf("failed to fetch subscription: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
-	if err != nil {
-		return fmt.Errorf("failed to read subscription body: %w", err)
+		return err
 	}
 
-	links, err := ParseSubscriptionContent(string(body))
+	links, err := ParseSubscriptionContent(content)
 	if err != nil {
 		return fmt.Errorf("failed to parse subscription content: %w", err)
 	}
@@ -679,6 +895,11 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 			if node.Status == NodeStatusCandidate && node.StatusReason == TransitionReasonOutboundRegistrationFailed {
 				if err := sm.applyTransitionLocked(idx, NodeStatusStaging, TransitionReasonSubscriptionReintroduced, EventActorSystem, "retry outbound registration"); err != nil {
 					sm.applyTransitionLocked(idx, NodeStatusCandidate, TransitionReasonOutboundRegistrationFailed, EventActorSystem, err.Error())
+				}
+			}
+			if node.Status == NodeStatusCandidate && node.StatusReason == TransitionReasonSubscriptionMissing {
+				if err := sm.applyTransitionLocked(idx, NodeStatusStaging, TransitionReasonSubscriptionReintroduced, EventActorSystem, "subscription reintroduced"); err != nil {
+					sm.applyTransitionLocked(idx, NodeStatusCandidate, TransitionReasonSubscriptionMissing, EventActorSystem, err.Error())
 				}
 			}
 			if node.Status == NodeStatusRemoved && node.StatusReason == TransitionReasonSubscriptionMissing {
@@ -718,10 +939,13 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 		if newNodeIDs[node.ID] {
 			continue
 		}
-		if node.Status == NodeStatusRemoved {
+		if node.Status == NodeStatusRemoved && node.StatusReason != TransitionReasonSubscriptionMissing {
 			continue
 		}
-		if err := sm.applyTransitionLocked(i, NodeStatusRemoved, TransitionReasonSubscriptionMissing, EventActorSystem, "node disappeared from upstream subscription"); err != nil {
+		if node.Status == NodeStatusCandidate && node.StatusReason == TransitionReasonSubscriptionMissing {
+			continue
+		}
+		if err := sm.applyTransitionLocked(i, NodeStatusCandidate, TransitionReasonSubscriptionMissing, EventActorSystem, "node disappeared from upstream subscription; parked in candidate"); err != nil {
 			return err
 		}
 	}
@@ -733,7 +957,7 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 		sm.state.Subscriptions[i].LastRefresh = &now
 		count := 0
 		for _, n := range sm.state.Nodes {
-			if n.SubscriptionID == id && n.Status != NodeStatusRemoved {
+			if n.SubscriptionID == id && isCountedSubscriptionNode(n) {
 				count++
 			}
 		}
@@ -744,6 +968,31 @@ func (sm *SubscriptionManager) refreshSubscription(id string) error {
 	sm.writeStateLocked()
 	go sm.emitPoolHealth()
 	return nil
+}
+
+func (sm *SubscriptionManager) loadSubscriptionContent(sub *SubscriptionRecord) (string, error) {
+	sourceType := normalizeSubscriptionSourceType(sub.SourceType)
+	if sourceType != SubscriptionSourceURL {
+		content := strings.TrimSpace(trimUTF8BOM(sub.Content))
+		if content == "" {
+			return "", fmt.Errorf("subscription content is empty")
+		}
+		return content, nil
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(sub.URL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch subscription: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if err != nil {
+		return "", fmt.Errorf("failed to read subscription body: %w", err)
+	}
+
+	return string(body), nil
 }
 
 func (sm *SubscriptionManager) handleProbeResults(results []ProbeResult) {
@@ -791,6 +1040,10 @@ func (sm *SubscriptionManager) handleProbeResults(results []ProbeResult) {
 		case NodeStatusStaging:
 			if result.Success && node.TotalPings >= cfg.MinSamples && failRate <= cfg.MaxFailRate && node.AvgDelayMs > 0 && node.AvgDelayMs <= cfg.MaxAvgDelayMs {
 				sm.applyTransitionLocked(idx, NodeStatusActive, TransitionReasonProbeQualified, EventActorSystem, "validation thresholds satisfied")
+				continue
+			}
+			if node.TotalPings >= cfg.MinSamples && node.ConsecutiveFails >= cfg.DemoteAfterFails {
+				sm.applyTransitionLocked(idx, NodeStatusQuarantine, TransitionReasonProbeFailuresExceeded, EventActorSystem, "validation probe failures exceeded threshold")
 			}
 		case NodeStatusActive:
 			if node.ConsecutiveFails >= cfg.DemoteAfterFails {
@@ -870,7 +1123,11 @@ func (sm *SubscriptionManager) applyTransitionLocked(idx int, nextStatus NodeSta
 		errors.LogWarning(context.Background(), "node pool: quarantined node ", node.Remark, " (", node.ID, ")")
 	case TransitionReasonProbeQualified, TransitionReasonProbeRequalified, TransitionReasonManualPromote:
 		errors.LogInfo(context.Background(), "node pool: activated node ", node.Remark, " (", node.ID, ")")
-	case TransitionReasonManualRemove, TransitionReasonSubscriptionMissing, TransitionReasonSubscriptionDeleted:
+	case TransitionReasonSubscriptionMissing:
+		errors.LogInfo(context.Background(), "node pool: parked missing subscription node in candidate ", node.Remark, " (", node.ID, ")")
+	case TransitionReasonManualRestore:
+		errors.LogInfo(context.Background(), "node pool: moved removed node back to candidate ", node.Remark, " (", node.ID, ")")
+	case TransitionReasonManualRemove, TransitionReasonSubscriptionDeleted:
 		errors.LogInfo(context.Background(), "node pool: removed node ", node.Remark, " (", node.ID, ")")
 	}
 
@@ -1163,6 +1420,11 @@ func (sm *SubscriptionManager) loadState() (*NodePoolState, bool) {
 
 	applyValidationDefaults(&state.ValidationConfig)
 	changed := false
+	for i := range state.Subscriptions {
+		if normalizeSubscriptionRecord(&state.Subscriptions[i]) {
+			changed = true
+		}
+	}
 	now := time.Now()
 	for i := range state.Nodes {
 		if normalizeNodeRecord(&state.Nodes[i], now) {
@@ -1234,6 +1496,103 @@ func applyValidationDefaults(cfg *ValidationConfig) {
 	if cfg.MinBandwidthKbps < 0 {
 		cfg.MinBandwidthKbps = 0
 	}
+}
+
+func normalizeSubscriptionSourceType(value SubscriptionSourceType) SubscriptionSourceType {
+	switch value {
+	case SubscriptionSourceManual, SubscriptionSourceFile:
+		return value
+	default:
+		return SubscriptionSourceURL
+	}
+}
+
+func buildSubscriptionRecord(input SubscriptionInput) (SubscriptionRecord, error) {
+	sourceType := normalizeSubscriptionSourceType(input.SourceType)
+	remark := strings.TrimSpace(input.Remark)
+	sourceName := strings.TrimSpace(input.SourceName)
+
+	rec := SubscriptionRecord{
+		SourceType: sourceType,
+		Remark:     remark,
+	}
+
+	switch sourceType {
+	case SubscriptionSourceURL:
+		urlStr := strings.TrimSpace(input.URL)
+		if urlStr == "" {
+			return SubscriptionRecord{}, fmt.Errorf("subscription URL is required")
+		}
+		rec.ID = hashID(urlStr)
+		rec.URL = urlStr
+		rec.AutoRefresh = input.AutoRefresh
+		rec.RefreshInterval = input.RefreshInterval
+		if rec.RefreshInterval <= 0 {
+			rec.RefreshInterval = 60
+		}
+	case SubscriptionSourceManual, SubscriptionSourceFile:
+		content := strings.TrimSpace(trimUTF8BOM(input.Content))
+		if content == "" {
+			return SubscriptionRecord{}, fmt.Errorf("subscription content is required")
+		}
+		rec.Content = content
+		rec.SourceName = sourceName
+		rec.ID = hashID(strings.Join([]string{string(sourceType), sourceName, content}, "\n"))
+	default:
+		return SubscriptionRecord{}, fmt.Errorf("unsupported subscription source type: %s", input.SourceType)
+	}
+
+	return rec, nil
+}
+
+func normalizeSubscriptionRecord(sub *SubscriptionRecord) bool {
+	changed := false
+
+	normalizedType := normalizeSubscriptionSourceType(sub.SourceType)
+	if sub.SourceType != normalizedType {
+		sub.SourceType = normalizedType
+		changed = true
+	}
+
+	trimmedURL := strings.TrimSpace(sub.URL)
+	if sub.URL != trimmedURL {
+		sub.URL = trimmedURL
+		changed = true
+	}
+	trimmedContent := strings.TrimSpace(trimUTF8BOM(sub.Content))
+	if sub.Content != trimmedContent {
+		sub.Content = trimmedContent
+		changed = true
+	}
+	trimmedRemark := strings.TrimSpace(sub.Remark)
+	if sub.Remark != trimmedRemark {
+		sub.Remark = trimmedRemark
+		changed = true
+	}
+	trimmedSourceName := strings.TrimSpace(sub.SourceName)
+	if sub.SourceName != trimmedSourceName {
+		sub.SourceName = trimmedSourceName
+		changed = true
+	}
+
+	switch sub.SourceType {
+	case SubscriptionSourceURL:
+		if sub.RefreshInterval <= 0 {
+			sub.RefreshInterval = 60
+			changed = true
+		}
+	case SubscriptionSourceManual, SubscriptionSourceFile:
+		if sub.AutoRefresh {
+			sub.AutoRefresh = false
+			changed = true
+		}
+		if sub.RefreshInterval != 0 {
+			sub.RefreshInterval = 0
+			changed = true
+		}
+	}
+
+	return changed
 }
 
 func normalizeNodeRecord(node *NodeRecord, now time.Time) bool {
@@ -1334,16 +1693,20 @@ func isAllowedNodeTransition(current, next NodeStatus) bool {
 	case NodeStatusCandidate:
 		return next == NodeStatusStaging || next == NodeStatusRemoved
 	case NodeStatusStaging:
-		return next == NodeStatusActive || next == NodeStatusQuarantine || next == NodeStatusRemoved
+		return next == NodeStatusActive || next == NodeStatusQuarantine || next == NodeStatusRemoved || next == NodeStatusCandidate
 	case NodeStatusActive:
-		return next == NodeStatusQuarantine || next == NodeStatusRemoved
+		return next == NodeStatusQuarantine || next == NodeStatusRemoved || next == NodeStatusCandidate
 	case NodeStatusQuarantine:
-		return next == NodeStatusActive || next == NodeStatusRemoved
+		return next == NodeStatusActive || next == NodeStatusRemoved || next == NodeStatusCandidate
 	case NodeStatusRemoved:
-		return next == NodeStatusStaging
+		return next == NodeStatusStaging || next == NodeStatusCandidate
 	default:
 		return false
 	}
+}
+
+func isCountedSubscriptionNode(node NodeRecord) bool {
+	return node.Status != NodeStatusRemoved && node.StatusReason != TransitionReasonSubscriptionMissing
 }
 
 func probeOutboundTag(nodeID string) string {

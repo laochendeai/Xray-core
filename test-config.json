@@ -1,0 +1,39 @@
+{
+  "log": {
+    "loglevel": "info"
+  },
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": [
+      "HandlerService",
+      "StatsService",
+      "LoggerService",
+      "RoutingService"
+    ]
+  },
+  "stats": {},
+  "policy": {
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": true,
+      "statsOutboundDownlink": true
+    }
+  },
+  "webpanel": {
+    "listen": "127.0.0.1:9527",
+    "apiEndpoint": "127.0.0.1:10085",
+    "username": "admin",
+    "password": "admin123",
+    "jwtSecret": "test-secret-key-12345",
+    "configPath": "/home/leo-cy/Xray-core-laochendeai/test-config.json"
+  },
+  "inbounds": [],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ]
+}

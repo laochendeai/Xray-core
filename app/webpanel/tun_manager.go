@@ -93,6 +93,7 @@ type TunFeatureSettings struct {
 type TunEditableSettings struct {
 	SelectionPolicy string   `json:"selectionPolicy"`
 	RouteMode       string   `json:"routeMode"`
+	RemoteDNS       []string `json:"remoteDns"`
 	ProtectCIDRs    []string `json:"protectCidrs"`
 	ProtectDomains  []string `json:"protectDomains"`
 }
@@ -506,7 +507,7 @@ func (m *TunManager) loadSettings() (*TunFeatureSettings, error) {
 	if len(settings.RemoteDNS) == 0 {
 		settings.RemoteDNS = append([]string{}, defaultTunDNS...)
 	} else {
-		settings.RemoteDNS = uniqStrings(settings.RemoteDNS)
+		settings.RemoteDNS = normalizeTunRemoteDNS(settings.RemoteDNS)
 	}
 
 	useSudo := os.Geteuid() != 0
@@ -555,6 +556,15 @@ func (m *TunManager) UpdateEditableSettings(next TunEditableSettings) (*TunEdita
 	routeMode := string(normalizeTunRouteMode(next.RouteMode))
 	tun["routeMode"] = routeMode
 
+	remoteDNS := normalizeTunRemoteDNS(next.RemoteDNS)
+	if len(remoteDNS) > 0 {
+		tun["remoteDns"] = remoteDNS
+	} else {
+		delete(tun, "remoteDns")
+	}
+	delete(tun, "remoteDnsAutoPick")
+	delete(tun, "remoteDnsMaxCount")
+
 	protectDomains := normalizeTunDomainRules(next.ProtectDomains)
 	if len(protectDomains) > 0 {
 		tun["protectDomains"] = protectDomains
@@ -596,6 +606,7 @@ func (m *TunManager) loadEditableSettingsLocked() (*TunEditableSettings, error) 
 	settings := &TunEditableSettings{
 		SelectionPolicy: string(defaultTunSelectionPolicy),
 		RouteMode:       string(defaultTunRouteMode),
+		RemoteDNS:       append([]string{}, defaultTunDNS...),
 	}
 	if tun == nil {
 		return settings, nil
@@ -606,6 +617,9 @@ func (m *TunManager) loadEditableSettingsLocked() (*TunEditableSettings, error) 
 	}
 	if value, ok := tun["routeMode"].(string); ok {
 		settings.RouteMode = string(normalizeTunRouteMode(value))
+	}
+	if remoteDNS := normalizeTunRemoteDNS(stringSliceFromAny(tun["remoteDns"])); len(remoteDNS) > 0 {
+		settings.RemoteDNS = remoteDNS
 	}
 	settings.ProtectDomains = normalizeTunDomainRules(stringSliceFromAny(tun["protectDomains"]))
 	settings.ProtectCIDRs = uniqStrings(stringSliceFromAny(tun["protectCidrs"]))
@@ -1164,6 +1178,18 @@ func normalizeTunDomainRule(value string) string {
 	default:
 		return trimmed
 	}
+}
+
+func normalizeTunRemoteDNS(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return uniqStrings(normalized)
 }
 
 func stringSliceFromAny(raw interface{}) []string {

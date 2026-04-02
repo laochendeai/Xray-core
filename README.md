@@ -170,6 +170,25 @@
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/XTLS/Xray-core)
 
+### Change Workflow
+
+This repository uses a hard-gated change workflow for local work and PRs.
+
+1. Open an issue. Use [`.github/ISSUE_TEMPLATE/change-request.md`](.github/ISSUE_TEMPLATE/change-request.md) for planned changes.
+2. Create a branch for that issue.
+3. Make the change.
+4. Run `bash scripts/check.sh`.
+5. Push. The local pre-push hook in [`.githooks/pre-push`](.githooks/pre-push) runs the same check again.
+6. Open a PR with [`.github/pull_request_template.md`](.github/pull_request_template.md) and wait for [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to pass.
+
+`scripts/check.sh` is the single local entry point. It runs the WebPanel Go tests, the frontend production build, and the key-path regression smoke test in [`tests/test_web_smoke.py`](tests/test_web_smoke.py).
+
+Fresh clones should install the shared hook path once:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Credits
 
 - [Xray-core v1.0.0](https://github.com/XTLS/Xray-core/releases/tag/v1.0.0) was forked from [v2fly-core 9a03cc5](https://github.com/v2fly/v2ray-core/commit/9a03cc5c98d04cc28320fcee26dbc236b3291256), and we have made & accumulated a huge number of enhancements over time, check [the release notes for each version](https://github.com/XTLS/Xray-core/releases).
