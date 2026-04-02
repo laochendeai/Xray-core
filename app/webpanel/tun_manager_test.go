@@ -1232,6 +1232,54 @@ printf 'installed for user=%s from xray=%s\n' "$target_user" "$xray_src"
 	}
 }
 
+func TestPrepareCommandInvocationUsesInterpreterForPathScript(t *testing.T) {
+	tempDir := t.TempDir()
+	tempBin := filepath.Join(tempDir, "bin")
+	if err := os.MkdirAll(tempBin, 0o755); err != nil {
+		t.Fatalf("create temp bin: %v", err)
+	}
+
+	fakeCommandPath := filepath.Join(tempBin, "fake-pkexec")
+	if err := os.WriteFile(fakeCommandPath, []byte("#!/bin/sh\nexec \"$@\"\n"), 0o755); err != nil {
+		t.Fatalf("write fake command: %v", err)
+	}
+
+	t.Setenv("PATH", tempBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cmdName, cmdArgs := prepareCommandInvocation("fake-pkexec", []string{"--flag", "value"})
+	if filepath.Base(cmdName) != "sh" {
+		t.Fatalf("expected sh interpreter, got %q", cmdName)
+	}
+	if len(cmdArgs) != 3 {
+		t.Fatalf("expected script path plus original args, got %v", cmdArgs)
+	}
+	if cmdArgs[0] != fakeCommandPath {
+		t.Fatalf("expected first arg to be script path %q, got %q", fakeCommandPath, cmdArgs[0])
+	}
+	if cmdArgs[1] != "--flag" || cmdArgs[2] != "value" {
+		t.Fatalf("expected original args to be preserved, got %v", cmdArgs)
+	}
+}
+
+func TestPrepareCommandInvocationUsesInterpreterForDirectScriptPath(t *testing.T) {
+	tempDir := t.TempDir()
+	scriptPath := filepath.Join(tempDir, "helper.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\nprintf 'ok\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write helper script: %v", err)
+	}
+
+	cmdName, cmdArgs := prepareCommandInvocation(scriptPath, []string{"status"})
+	if filepath.Base(cmdName) != "sh" {
+		t.Fatalf("expected sh interpreter, got %q", cmdName)
+	}
+	if len(cmdArgs) != 2 {
+		t.Fatalf("expected script path and original arg, got %v", cmdArgs)
+	}
+	if cmdArgs[0] != scriptPath || cmdArgs[1] != "status" {
+		t.Fatalf("expected script invocation to preserve path and arg, got %v", cmdArgs)
+	}
+}
+
 func TestTunManagerStatusDetectsStalePrivilegeArtifacts(t *testing.T) {
 	tempDir := t.TempDir()
 	stateDir := filepath.Join(tempDir, "runtime", "tun")

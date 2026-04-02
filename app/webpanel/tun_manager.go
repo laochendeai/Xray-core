@@ -386,7 +386,7 @@ func (m *TunManager) installPrivilegeLocked(settings *TunFeatureSettings) (strin
 	}
 
 	if graphicalSudoAvailable(askpassScriptPath) {
-		cmd := exec.Command("sudo", append([]string{"-A"}, installArgs...)...)
+		cmd := execCommandCompat("sudo", append([]string{"-A"}, installArgs...)...)
 		cmd.Env = append(os.Environ(),
 			"SUDO_ASKPASS="+askpassScriptPath,
 			"SUDO_ASKPASS_PROMPT=WebPanel needs your password to install or repair the transparent proxy helper.",
@@ -407,7 +407,7 @@ func (m *TunManager) installPrivilegeLocked(settings *TunFeatureSettings) (strin
 		return "", fmt.Errorf("pkexec is not available: %w", err)
 	}
 
-	cmd := exec.Command("pkexec", installArgs...)
+	cmd := execCommandCompat("pkexec", installArgs...)
 	// Detach from the launch terminal so pkexec uses the desktop polkit agent
 	// instead of prompting on the hidden controlling TTY of the web panel process.
 	detachFromControllingTTY(cmd)
@@ -439,6 +439,61 @@ func graphicalSudoAvailable(askpassScriptPath string) bool {
 		}
 	}
 	return false
+}
+
+// Some CI environments expose sudo/pkexec/test helpers as shebang scripts
+// that are not directly spawnable on Windows. Use the declared interpreter when needed.
+func prepareCommandInvocation(name string, args []string) (string, []string) {
+	resolvedName := name
+	if candidate, err := exec.LookPath(name); err == nil {
+		resolvedName = candidate
+	}
+
+	interpreter, interpreterArgs, ok := detectScriptInterpreter(resolvedName)
+	if !ok {
+		return resolvedName, args
+	}
+
+	invocationArgs := make([]string, 0, len(interpreterArgs)+1+len(args))
+	invocationArgs = append(invocationArgs, interpreterArgs...)
+	invocationArgs = append(invocationArgs, resolvedName)
+	invocationArgs = append(invocationArgs, args...)
+	return interpreter, invocationArgs
+}
+
+func detectScriptInterpreter(path string) (string, []string, bool) {
+	content, err := os.ReadFile(path)
+	if err != nil || !bytes.HasPrefix(content, []byte("#!")) {
+		return "", nil, false
+	}
+
+	firstLine := content
+	if newline := bytes.IndexByte(firstLine, '\n'); newline >= 0 {
+		firstLine = firstLine[:newline]
+	}
+	firstLine = bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimRight(firstLine, "\r"), []byte("#!")))
+	fields := strings.Fields(string(firstLine))
+	if len(fields) == 0 {
+		return "", nil, false
+	}
+
+	interpreterName := fields[0]
+	interpreterArgs := fields[1:]
+	if filepath.Base(interpreterName) == "env" && len(fields) > 1 {
+		interpreterName = fields[1]
+		interpreterArgs = fields[2:]
+	}
+
+	interpreter, err := exec.LookPath(filepath.Base(interpreterName))
+	if err != nil {
+		return "", nil, false
+	}
+	return interpreter, interpreterArgs, true
+}
+
+func execCommandCompat(name string, args ...string) *exec.Cmd {
+	cmdName, cmdArgs := prepareCommandInvocation(name, args)
+	return exec.Command(cmdName, cmdArgs...)
 }
 
 func currentUserName() string {
@@ -775,7 +830,7 @@ func (m *TunManager) runHelperLocked(settings *TunFeatureSettings, action string
 		cmdArgs = append([]string{"-n", settings.HelperPath}, helperArgs...)
 	}
 
-	cmd := exec.Command(cmdName, cmdArgs...)
+	cmd := execCommandCompat(cmdName, cmdArgs...)
 	cmd.Env = append(os.Environ(),
 		"XRAY_BIN="+settings.BinaryPath,
 		"XRAY_CONFIG="+settings.RuntimeConfigPath,
@@ -2030,7 +2085,7 @@ func checkSudoReady(settings *TunFeatureSettings) bool {
 		return false
 	}
 
-	cmd := exec.Command("sudo", "-n", "-l")
+	cmd := execCommandCompat("sudo", "-n", "-l")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false
