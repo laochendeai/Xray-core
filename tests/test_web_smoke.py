@@ -85,6 +85,7 @@ class WebSmokeTest(unittest.TestCase):
         api_port = reserve_port()
         web_port = reserve_port()
         inbound_port = reserve_port()
+        user_inbound_port = reserve_port()
         cls.base_url = f"http://127.0.0.1:{web_port}"
 
         config = json.loads(BASE_CONFIG.read_text(encoding="utf-8"))
@@ -102,7 +103,22 @@ class WebSmokeTest(unittest.TestCase):
                     "auth": "noauth",
                     "udp": True,
                 },
-            }
+            },
+            {
+                "tag": "smoke-vless",
+                "listen": "127.0.0.1",
+                "port": user_inbound_port,
+                "protocol": "vless",
+                "settings": {
+                    "clients": [
+                        {
+                            "id": "11111111-1111-1111-1111-111111111111",
+                            "email": "smoke-user@example.com",
+                        }
+                    ],
+                    "decryption": "none",
+                },
+            },
         ]
         cls.config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -314,6 +330,55 @@ class WebSmokeTest(unittest.TestCase):
                 self.api_json("DELETE", f"/api/v1/inbounds/{clone_inbound_tag}")
             with contextlib.suppress(Exception):
                 self.api_json("DELETE", f"/api/v1/outbounds/{clone_outbound_tag}")
+
+    def test_edit_user_reset_traffic_and_generate_share_link(self) -> None:
+        updated_email = "smoke-user-updated@example.com"
+        updated_uuid = "22222222-2222-2222-2222-222222222222"
+
+        users = self.api_get("/api/v1/users/")["users"]
+        user = next(item for item in users if item["email"] == "smoke-user@example.com")
+        self.assertEqual(user["inboundTag"], "smoke-vless")
+
+        updated_account = json.loads(json.dumps(user["account"]))
+        updated_account["id"] = updated_uuid
+        self.api_json(
+            "PUT",
+            "/api/v1/inbounds/smoke-vless/users/smoke-user%40example.com",
+            {
+                "email": updated_email,
+                "level": 1,
+                "accountType": user["accountType"],
+                "account": updated_account,
+            },
+        )
+
+        updated_users = self.wait_for_api(
+            "/api/v1/users/",
+            lambda data: any(item["email"] == updated_email and item["level"] == 1 for item in data["users"]),
+        )
+        updated_user = next(item for item in updated_users["users"] if item["email"] == updated_email)
+        self.assertEqual(updated_user["account"]["id"], updated_uuid)
+
+        reset_result = self.api_json(
+            "POST",
+            "/api/v1/users/smoke-user-updated%40example.com/reset-traffic",
+        )
+        self.assertEqual(reset_result["message"], "User traffic reset successfully")
+
+        share_result = self.api_json(
+            "POST",
+            "/api/v1/share/generate",
+            {
+                "protocol": "vless",
+                "address": "example.com",
+                "port": 443,
+                "uuid": updated_uuid,
+                "type": "tcp",
+                "tls": "tls",
+                "sni": "example.com",
+            },
+        )
+        self.assertIn(updated_uuid, share_result["link"])
 
     def test_add_subscription_refresh_and_remove_node_observe_api_state_change(self) -> None:
         initial_link = (

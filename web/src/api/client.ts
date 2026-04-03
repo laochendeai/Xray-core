@@ -66,6 +66,8 @@ export const handlerAPI = {
   getInboundUsers: (tag: string) => apiClient.get(`/inbounds/${tag}/users`) as Promise<any>,
   addInboundUser: (tag: string, user: any) =>
     apiClient.post(`/inbounds/${tag}/users`, user) as Promise<any>,
+  updateInboundUser: (tag: string, email: string, user: any) =>
+    apiClient.put(`/inbounds/${tag}/users/${encodeURIComponent(email)}`, user) as Promise<any>,
   removeInboundUser: (tag: string, email: string) =>
     apiClient.delete(`/inbounds/${tag}/users/${email}`) as Promise<any>,
   listOutbounds: () => apiClient.get('/outbounds') as Promise<any>,
@@ -78,7 +80,8 @@ export const handlerAPI = {
 
 export const usersAPI = {
   listAll: () => apiClient.get('/users/') as Promise<any>,
-  deleteUser: (email: string) => apiClient.delete(`/users/${email}`) as Promise<any>
+  deleteUser: (email: string) => apiClient.delete(`/users/${email}`) as Promise<any>,
+  resetTraffic: (email: string) => apiClient.post(`/users/${encodeURIComponent(email)}/reset-traffic`) as Promise<any>
 }
 
 export const routingAPI = {
