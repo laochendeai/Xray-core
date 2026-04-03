@@ -1,8 +1,28 @@
-# Project X
+# Xray-core (laochendeai fork)
+
+This repository is a maintained fork of [XTLS/Xray-core](https://github.com/XTLS/Xray-core) with an embedded WebPanel focused on local operation and transparent-proxy management. It keeps the upstream Xray-core runtime, and adds a single-binary control plane for subscriptions, node-pool lifecycle management, TUN orchestration, DNS split-policy, and update discovery.
+
+The upstream project remains [Project X](https://github.com/XTLS). Upstream README and ecosystem links are still useful reference material, but the fork-specific behavior in this repository is documented here first.
+
+## Fork Highlights
+
+- Embedded WebPanel served from the Xray binary through `embed.FS`
+- Subscription import from remote URL, manual paste, and local file upload
+- Node pool lifecycle with candidate, validation, active, quarantine, and removed states
+- Transparent proxy / TUN controls with direct-vs-proxy policy, remote DNS list, and clean restore
+- Dashboard update discovery against upstream releases
+
+## Documentation Map
+
+- [`web/README.md`](web/README.md): WebPanel pages, APIs, transparent-mode behavior, and development notes
+- [`README.md`](README.md): fork overview, build entry points, and repository workflow
+- [`scripts/check.sh`](scripts/check.sh): single local verification entry point before push
+
+## Upstream Reference
 
 [Project X](https://github.com/XTLS) originates from XTLS protocol, providing a set of network tools such as [Xray-core](https://github.com/XTLS/Xray-core) and [REALITY](https://github.com/XTLS/REALITY).
 
-[README](https://github.com/XTLS/Xray-core#readme) is open, so feel free to submit your project [here](https://github.com/XTLS/Xray-core/pulls).
+The upstream [README](https://github.com/XTLS/Xray-core#readme) is open, so feel free to submit your project [here](https://github.com/XTLS/Xray-core/pulls).
 
 ## Sponsors
 
@@ -180,6 +200,11 @@ This repository uses a hard-gated change workflow for local work and PRs.
 4. Run `bash scripts/check.sh`.
 5. Push. The local pre-push hook in [`.githooks/pre-push`](.githooks/pre-push) runs the same check again.
 6. Open a PR with [`.github/pull_request_template.md`](.github/pull_request_template.md), include `Closes #<issue-number>` in the PR body, and wait for [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to pass.
+
+### UI Text / i18n Rule
+
+- Any change to user-facing UI text must update both [`web/src/i18n/locales/zh-CN.json`](web/src/i18n/locales/zh-CN.json) and [`web/src/i18n/locales/en.json`](web/src/i18n/locales/en.json) in the same PR.
+- Do not merge a change that ships one locale ahead of the other.
 
 `scripts/check.sh` is the single local entry point. It runs the WebPanel Go tests, the frontend production build, and the key-path regression smoke test in [`tests/test_web_smoke.py`](tests/test_web_smoke.py).
 

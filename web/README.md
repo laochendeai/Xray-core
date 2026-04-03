@@ -2,11 +2,17 @@
 
 Xray Web Panel 是 Xray-core 的内嵌式 Web 管理面板，编译后生成**单一二进制文件**，无需额外部署前端服务，开箱即用。
 
+当前这个 fork 的 WebPanel 不只是基础 CRUD 面板，还覆盖了订阅导入、节点池生命周期、透明代理 / TUN 控制、DNS 分流说明和上游版本更新发现。
+
 ## 特性
 
 - **单一二进制部署** - 前端通过 Go `embed.FS` 嵌入，一个文件搞定一切
-- **完整的 gRPC 桥接** - 通过 REST API 代理 Xray Commander 的全部 gRPC 接口
+- **完整的 gRPC 桥接** - 通过 REST API 代理 Xray Commander 的核心 gRPC 接口
 - **双通道控制** - Runtime API 即时生效 + Config File 持久化修改
+- **版本更新发现** - 仪表盘可检查当前版本与上游 Xray-core 发布状态
+- **订阅导入** - 支持远程 URL、手工粘贴、本地文件上传
+- **节点池生命周期** - 候选、验证中、活跃、隔离、已移除五个池，支持排序和批量操作
+- **透明代理 / TUN 管理** - 提供启停、恢复干净系统、远端 DNS、直连白名单、节点选择策略
 - **JWT 认证** - 登录限流防暴力破解，token 24 小时过期
 - **实时监控** - WebSocket 推送流量速率和连接信息
 - **分享链接** - 一键生成 VLESS/VMess/Trojan/Shadowsocks 分享 URI
@@ -97,19 +103,20 @@ make build-dev
 | `username` | string | `admin` | 登录用户名 |
 | `password` | string | `admin123` | 登录密码 |
 | `jwtSecret` | string | `xray-webpanel-secret` | JWT 签名密钥，**务必修改** |
-| `configPath` | string | - | Xray 配置文件路径，用于配置编辑/备份功能 |
+| `configPath` | string | - | Xray 配置文件路径，用于配置编辑、订阅、节点池与备份功能 |
 | `certFile` | string | - | TLS 证书文件路径（可选） |
 | `keyFile` | string | - | TLS 私钥文件路径（可选） |
 
 ---
 
-## 功能模块
+## 页面与功能
 
 ### 仪表盘 (`/dashboard`)
 
 - 系统信息：运行时间、Goroutine 数、内存占用、GC 次数
 - 流量概览：总上传/下载
 - 在线用户数
+- 当前版本与上游发布状态检查
 - 实时流量折线图（5 秒轮询）
 - Top 10 用户流量排行
 
@@ -140,9 +147,11 @@ make build-dev
 
 ### DNS 配置 (`/dns`)
 
-- 查看 DNS 服务器列表
-- 查看静态 Hosts 映射
-- 显示查询策略等通用设置
+- 这是一个**解释页**，不是独立 DNS 编辑器
+- 展示主配置文件里的 `dns` 段、静态 Hosts 和查询策略
+- 展示透明模式下国内直连 / 国外代理的 DNS 分流逻辑
+- 基础 DNS 配置仍在 `/config` 页面维护
+- 透明模式使用的远端 DNS 列表在 `/node-pool` 页面维护
 
 ### 实时监控 (`/monitor`)
 
@@ -156,6 +165,8 @@ make build-dev
 - 策略配置查看
 - Observatory 出站健康状态表
 - API 设置查看
+- TUN 诊断信息查看
+- 这里主要保留诊断信息；透明模式主控制入口已经转移到节点池页
 
 ### 配置管理 (`/config`)
 
@@ -164,11 +175,36 @@ make build-dev
 - **导入/导出**：JSON 文件上传/下载
 - **备份/恢复**：自动时间戳备份（保留最近 20 个），一键恢复
 
+### 订阅管理 (`/subscriptions`)
+
+- 支持三种导入方式：远程 URL、手工粘贴、本地文件上传
+- 可设置备注、自动刷新和刷新间隔
+- 支持手工立即刷新订阅
+- 删除订阅时，该订阅下节点会转入生命周期管理，不会直接抹掉全部记录
+- 本地上传文件只在导入当次读取内容，不会持续监听本地文件变化
+
+### 节点池 (`/node-pool`)
+
+- 显示五个池：候选、验证中、活跃、隔离、已移除
+- 候选池**不会自动探测**；只有手工加入验证池后才开始探测
+- 各池支持按质量、最后探测时间、失败率、平均延迟排序
+- 支持单个和批量操作：加入验证、晋升活跃、移出活跃、移入已移除、恢复到候选、彻底删除已移除节点
+- 支持批量移除不稳定节点，以及清理 100% 失败率的已移除记录
+- 透明模式主控制入口在这里：启用透明模式、恢复干净系统、配置最少活跃节点、探测参数、远端 DNS、直连白名单、分流策略、节点选择策略
+
+### 节点生命周期速览
+
+- **候选池**：新发现节点、订阅中暂时消失的节点、或从已移除手工恢复的节点；默认不自动探测
+- **验证池**：正在按探测地址统计失败率和平均延迟
+- **活跃池**：探测达标，可参与透明模式和节点选择
+- **隔离池**：连续失败过多或被手工移出活跃池，暂不参与活跃选择
+- **已移除池**：手工移除或订阅整体删除后的节点；可手工恢复到候选池，或彻底删除记录
+
 ---
 
 ## REST API
 
-所有 API 均需 JWT 认证（`Authorization: Bearer <token>`），除登录和订阅端点外。
+所有 API 均需 JWT 认证（`Authorization: Bearer <token>`），除登录和公开订阅端点外。
 
 ### 认证
 
@@ -181,6 +217,7 @@ make build-dev
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/v1/sys/stats` | 系统状态（Goroutine、内存、GC 等） |
+| GET | `/api/v1/sys/update` | 检查当前版本与上游发布状态 |
 | GET | `/api/v1/stats/query?pattern=&reset=` | 查询流量统计 |
 | GET | `/api/v1/stats/online-users` | 获取在线用户列表 |
 | GET | `/api/v1/stats/online-ips?email=` | 获取用户在线 IP |
@@ -216,6 +253,43 @@ make build-dev
 | POST | `/api/v1/routing/test` | 测试路由匹配 |
 | GET | `/api/v1/routing/balancers/:tag` | 获取均衡器信息 |
 | PUT | `/api/v1/routing/balancers/:tag` | 覆盖均衡器目标 |
+
+### 透明模式 / TUN
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/tun/status` | 获取透明模式状态与诊断信息 |
+| GET | `/api/v1/tun/settings` | 读取透明模式可编辑设置 |
+| PUT | `/api/v1/tun/settings` | 保存透明模式可编辑设置 |
+| POST | `/api/v1/tun/start` | 启动透明模式 |
+| POST | `/api/v1/tun/stop` | 停止透明模式 |
+| POST | `/api/v1/tun/restore-clean` | 恢复干净系统 |
+| POST | `/api/v1/tun/toggle` | 切换透明模式开关 |
+| POST | `/api/v1/tun/install-privilege` | 安装或修复提权组件 |
+
+### 订阅与节点池
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/subscriptions` | 列出订阅源 |
+| POST | `/api/v1/subscriptions` | 添加订阅源 |
+| DELETE | `/api/v1/subscriptions/:id` | 删除订阅源 |
+| POST | `/api/v1/subscriptions/:id/refresh` | 立即刷新订阅源 |
+| GET | `/api/v1/node-pool` | 获取节点池概览、节点列表、最近事件 |
+| GET | `/api/v1/node-pool/config` | 获取节点验证配置 |
+| PUT | `/api/v1/node-pool/config` | 更新节点验证配置 |
+| POST | `/api/v1/node-pool/:id/validate` | 将节点加入验证池 |
+| POST | `/api/v1/node-pool/:id/promote` | 将节点手工晋升为活跃 |
+| POST | `/api/v1/node-pool/:id/quarantine` | 将节点移出活跃池 |
+| POST | `/api/v1/node-pool/:id/demote` | 将节点降级到隔离池 |
+| POST | `/api/v1/node-pool/:id/remove` | 将节点移入已移除池 |
+| POST | `/api/v1/node-pool/:id/restore` | 将已移除节点恢复到候选池 |
+| DELETE | `/api/v1/node-pool/:id` | 彻底删除单个节点记录 |
+| POST | `/api/v1/node-pool/bulk-validate` | 批量加入验证池 |
+| POST | `/api/v1/node-pool/bulk-promote` | 批量晋升活跃 |
+| POST | `/api/v1/node-pool/bulk-restore` | 批量恢复到候选池 |
+| POST | `/api/v1/node-pool/bulk-remove` | 按筛选条件批量移除节点 |
+| POST | `/api/v1/node-pool/bulk-purge-removed` | 批量彻底删除已移除节点 |
 
 ### 其他
 
@@ -254,8 +328,8 @@ WebSocket 通过 URL 参数 `?token=<jwt>` 传递认证。
 - 纯 Go 标准库 `net/http` 路由
 - 复用 Xray 已有的 gRPC client stubs（HandlerService / StatsService / RoutingService / LoggerService / ObservatoryService）
 - Go `embed.FS` 嵌入前端编译产物
-- `gorilla/websocket`（项目已有依赖）处理实时数据流
-- JWT 认证（纯 Go 实现，无外部依赖）
+- `gorilla/websocket` 处理实时数据流
+- JWT 认证（纯 Go 实现，无额外 Web 框架）
 
 ### 前端（Vue 3）
 
@@ -277,13 +351,13 @@ WebSocket 通过 URL 参数 `?token=<jwt>` 传递认证。
 
 ## 项目结构
 
-```
+```text
 app/webpanel/                    # Go 后端
     config.proto                 # Protobuf 配置定义
     config.pb.go                 # Protobuf 生成代码
     webpanel.go                  # Feature 注册 + HTTP 服务器 + 路由
     auth.go                      # JWT 认证 + 登录限流
-    grpc_client.go               # gRPC 连接管理（5 个服务客户端）
+    grpc_client.go               # gRPC 连接管理
     handler_auth.go              # 登录 API
     handler_stats.go             # 统计 API
     handler_handler.go           # 入站/出站管理 API
@@ -292,10 +366,16 @@ app/webpanel/                    # Go 后端
     handler_config.go            # 配置文件 CRUD API
     handler_logger.go            # 日志 API
     handler_observatory.go       # Observatory API
-    handler_subscription.go      # 订阅端点
+    handler_update.go            # 版本更新检查 API
+    handler_tun.go               # 透明模式 / TUN API
+    handler_node_pool.go         # 订阅与节点池 API
+    handler_subscription.go      # 公开订阅端点
     ws_routing.go                # WebSocket 路由流 + 流量推送
     config_file.go               # 配置文件读写/备份逻辑
-    share_link.go                # 分享链接生成（VLESS/VMess/Trojan/SS）
+    subscription_manager.go      # 订阅同步与节点池生命周期
+    tun_manager.go               # 透明模式运行时管理
+    update_checker.go            # 上游版本检查
+    share_link.go                # 分享链接生成
     embed.go                     # //go:embed dist
     dist/                        # 前端编译产物（嵌入）
 
@@ -311,7 +391,7 @@ web/                             # Vue 3 前端源码
             auth.ts              # 认证状态
             stats.ts             # 统计数据
         router/index.ts          # 路由定义 + 导航守卫
-        views/                   # 10 个页面组件
+        views/                   # 12 个页面组件（含订阅、节点池、登录）
         components/layout/       # AppShell 布局
         composables/             # usePolling / useWebSocket
         i18n/locales/            # zh-CN.json / en.json
@@ -319,6 +399,14 @@ web/                             # Vue 3 前端源码
 
 infra/conf/webpanel.go           # JSON 配置解析
 ```
+
+---
+
+## i18n 要求
+
+1. 所有用户可见的文案变更，必须在同一个 PR 内同时更新 `web/src/i18n/locales/zh-CN.json` 和 `web/src/i18n/locales/en.json`。
+2. 不允许只改一个语言版本后再补另一个版本。
+3. 新增页面或交互提示时，优先走 i18n key，不要把文案硬编码在组件里。
 
 ---
 
