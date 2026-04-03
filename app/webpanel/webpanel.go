@@ -20,22 +20,24 @@ import (
 // WebPanel is the main feature that runs the web management panel.
 type WebPanel struct {
 	sync.Mutex
-	config       *Config
-	server       *http.Server
-	listener     net.Listener
-	grpcClient   *GRPCClient
-	auth         *AuthManager
-	instance     *core.Instance
-	runtimeCtx   context.Context
-	subManager   *SubscriptionManager
-	tunManager   *TunManager
-	controlPlane *ControlPlaneStateStore
+	config         *Config
+	server         *http.Server
+	listener       net.Listener
+	grpcClient     *GRPCClient
+	auth           *AuthManager
+	instance       *core.Instance
+	runtimeCtx     context.Context
+	subManager     *SubscriptionManager
+	tunManager     *TunManager
+	controlPlane   *ControlPlaneStateStore
+	releaseChecker *releaseChecker
 }
 
 // NewWebPanel creates a new WebPanel instance from config.
 func NewWebPanel(ctx context.Context, config *Config) (*WebPanel, error) {
 	wp := &WebPanel{
-		config: config,
+		config:         config,
+		releaseChecker: newReleaseChecker(nil, defaultReleaseFeedURL, defaultReleaseSource, 30*time.Minute),
 	}
 
 	s := core.FromContext(ctx)
@@ -187,6 +189,7 @@ func (wp *WebPanel) registerRoutes(mux *http.ServeMux) {
 
 	// Stats
 	mux.HandleFunc("/api/v1/sys/stats", wp.authMiddleware(wp.handleSysStats))
+	mux.HandleFunc("/api/v1/sys/update", wp.authMiddleware(wp.handleUpdateStatus))
 	mux.HandleFunc("/api/v1/stats/query", wp.authMiddleware(wp.handleQueryStats))
 	mux.HandleFunc("/api/v1/stats/online-users", wp.authMiddleware(wp.handleOnlineUsers))
 	mux.HandleFunc("/api/v1/stats/online-ips", wp.authMiddleware(wp.handleOnlineIPs))
