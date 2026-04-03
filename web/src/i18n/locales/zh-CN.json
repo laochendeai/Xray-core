@@ -237,7 +237,11 @@
     "lastRefresh": "上次刷新",
     "nodeCount": "节点数",
     "addSubscription": "添加订阅",
+    "editSubscription": "编辑订阅",
     "deleteConfirm": "确定要删除此订阅及其所有节点吗？",
+    "pause": "暂停",
+    "resume": "恢复",
+    "nonUrlEditHint": "手工导入和本地文件导入当前只支持修改备注。如需替换导入内容，请删除后重新导入。",
     "refreshNow": "立即刷新",
     "never": "从未",
     "sourceTypeOptions": {

@@ -3,6 +3,8 @@ package webpanel
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -906,7 +908,7 @@ func TestSubscriptionManagerRefreshSubscriptionParksMissingNodesInCandidate(t *t
 	}
 	sm.mu.Unlock()
 
-	if err := sm.refreshSubscription(subID); err != nil {
+	if err := sm.RefreshSubscription(subID); err != nil {
 		t.Fatalf("initial refresh subscription: %v", err)
 	}
 
@@ -928,7 +930,7 @@ func TestSubscriptionManagerRefreshSubscriptionParksMissingNodesInCandidate(t *t
 	sm.state.Subscriptions[0].Content = liveURI
 	sm.mu.Unlock()
 
-	if err := sm.refreshSubscription(subID); err != nil {
+	if err := sm.RefreshSubscription(subID); err != nil {
 		t.Fatalf("second refresh subscription: %v", err)
 	}
 
@@ -998,7 +1000,7 @@ func TestSubscriptionManagerRefreshSubscriptionReintroducesCandidateMissingNode(
 	}
 	sm.mu.Unlock()
 
-	if err := sm.refreshSubscription(subID); err != nil {
+	if err := sm.RefreshSubscription(subID); err != nil {
 		t.Fatalf("initial refresh subscription: %v", err)
 	}
 
@@ -1018,7 +1020,7 @@ func TestSubscriptionManagerRefreshSubscriptionReintroducesCandidateMissingNode(
 	sm.state.Nodes[0].LastEventAt = timePtr(now)
 	sm.mu.Unlock()
 
-	if err := sm.refreshSubscription(subID); err != nil {
+	if err := sm.RefreshSubscription(subID); err != nil {
 		t.Fatalf("second refresh subscription: %v", err)
 	}
 
@@ -1038,6 +1040,316 @@ func TestSubscriptionManagerRefreshSubscriptionReintroducesCandidateMissingNode(
 	if len(handlerStub.addedTags) != 1 || handlerStub.addedTags[0] != probeOutboundTag(nodeID) {
 		t.Fatalf("expected outbound %q to be added once, got %v", probeOutboundTag(nodeID), handlerStub.addedTags)
 	}
+}
+
+func TestSubscriptionManagerUpdateSubscriptionMetadataKeepsNodeHistory(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	handlerStub := &stubHandlerServiceClient{}
+	sm := NewSubscriptionManager(configPath, &GRPCClient{handlerClient: handlerStub}, nil, nil)
+	defer sm.Stop()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(
+			"vless://11111111-1111-1111-1111-111111111111@meta.example.com:443?security=tls&sni=meta.example.com#meta-node\n",
+		))
+	}))
+	defer server.Close()
+
+	sub, err := sm.AddSubscription(SubscriptionInput{
+		SourceType:      SubscriptionSourceURL,
+		URL:             server.URL,
+		Remark:          "url sub",
+		AutoRefresh:     true,
+		RefreshInterval: 60,
+	})
+	if err != nil {
+		t.Fatalf("add URL subscription: %v", err)
+	}
+
+	nodes := sm.ListNodes("")
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	originalNode := nodes[0]
+
+	updated, err := sm.UpdateSubscription(sub.ID, SubscriptionUpdateInput{
+		SourceType:      sourceTypePtr(SubscriptionSourceURL),
+		Remark:          stringPtr("updated remark"),
+		AutoRefresh:     boolPtr(false),
+		RefreshInterval: intPtr(120),
+	})
+	if err != nil {
+		t.Fatalf("update subscription metadata: %v", err)
+	}
+
+	if updated.ID != sub.ID {
+		t.Fatalf("expected subscription ID to remain %q, got %q", sub.ID, updated.ID)
+	}
+	if updated.Remark != "updated remark" {
+		t.Fatalf("expected updated remark, got %q", updated.Remark)
+	}
+	if updated.AutoRefresh {
+		t.Fatal("expected auto-refresh to be disabled after pause")
+	}
+	if updated.RefreshInterval != 120 {
+		t.Fatalf("expected refresh interval 120, got %d", updated.RefreshInterval)
+	}
+
+	nodes = sm.ListNodes("")
+	if len(nodes) != 1 {
+		t.Fatalf("expected node count to remain 1, got %d", len(nodes))
+	}
+	if nodes[0].ID != originalNode.ID {
+		t.Fatalf("expected node ID %q to remain unchanged, got %q", originalNode.ID, nodes[0].ID)
+	}
+	if len(handlerStub.addedTags) != 1 {
+		t.Fatalf("expected no extra outbound registrations during metadata-only update, got %v", handlerStub.addedTags)
+	}
+	if len(handlerStub.removedTags) != 0 {
+		t.Fatalf("expected no outbound removals during metadata-only update, got %v", handlerStub.removedTags)
+	}
+
+	listed := sm.ListSubscriptions()
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 subscription, got %d", len(listed))
+	}
+	if listed[0].ID != sub.ID {
+		t.Fatalf("expected listed subscription ID %q, got %q", sub.ID, listed[0].ID)
+	}
+	if listed[0].AutoRefresh {
+		t.Fatal("expected listed subscription auto-refresh to stay disabled")
+	}
+}
+
+func TestSubscriptionManagerUpdateSubscriptionURLReconcilesNodesInPlace(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	handlerStub := &stubHandlerServiceClient{}
+	sm := NewSubscriptionManager(configPath, &GRPCClient{handlerClient: handlerStub}, nil, nil)
+	defer sm.Stop()
+
+	serverA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(
+			"vless://22222222-2222-2222-2222-222222222222@update-a.example.com:443?security=tls&sni=update-a.example.com#update-a\n",
+		))
+	}))
+	defer serverA.Close()
+
+	serverB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(
+			"vless://33333333-3333-3333-3333-333333333333@update-b.example.com:443?security=tls&sni=update-b.example.com#update-b\n",
+		))
+	}))
+	defer serverB.Close()
+
+	sub, err := sm.AddSubscription(SubscriptionInput{
+		SourceType:      SubscriptionSourceURL,
+		URL:             serverA.URL,
+		Remark:          "url sub",
+		AutoRefresh:     false,
+		RefreshInterval: 60,
+	})
+	if err != nil {
+		t.Fatalf("add URL subscription: %v", err)
+	}
+
+	nodes := sm.ListNodes("")
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	originalNodeID := nodes[0].ID
+
+	updated, err := sm.UpdateSubscription(sub.ID, SubscriptionUpdateInput{
+		URL: stringPtr(serverB.URL),
+	})
+	if err != nil {
+		t.Fatalf("update subscription URL: %v", err)
+	}
+
+	if updated.ID != sub.ID {
+		t.Fatalf("expected subscription ID to remain %q, got %q", sub.ID, updated.ID)
+	}
+	if updated.URL != serverB.URL {
+		t.Fatalf("expected updated URL %q, got %q", serverB.URL, updated.URL)
+	}
+
+	nodes = sm.ListNodes("")
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes after reconciliation, got %d", len(nodes))
+	}
+
+	statusByID := make(map[string]NodeStatus, len(nodes))
+	reasonByID := make(map[string]TransitionReason, len(nodes))
+	subscriptionByID := make(map[string]string, len(nodes))
+	addressByID := make(map[string]string, len(nodes))
+	for _, node := range nodes {
+		statusByID[node.ID] = node.Status
+		reasonByID[node.ID] = node.StatusReason
+		subscriptionByID[node.ID] = node.SubscriptionID
+		addressByID[node.ID] = node.Address
+	}
+
+	if statusByID[originalNodeID] != NodeStatusCandidate {
+		t.Fatalf("expected original node to move to candidate, got %q", statusByID[originalNodeID])
+	}
+	if reasonByID[originalNodeID] != TransitionReasonSubscriptionMissing {
+		t.Fatalf("expected original node reason subscription_missing, got %q", reasonByID[originalNodeID])
+	}
+	if subscriptionByID[originalNodeID] != sub.ID {
+		t.Fatalf("expected original node subscription ID %q, got %q", sub.ID, subscriptionByID[originalNodeID])
+	}
+
+	replacementCount := 0
+	for nodeID, address := range addressByID {
+		if address != "update-b.example.com" {
+			continue
+		}
+		replacementCount++
+		if statusByID[nodeID] != NodeStatusStaging {
+			t.Fatalf("expected replacement node to be staging, got %q", statusByID[nodeID])
+		}
+		if reasonByID[nodeID] != TransitionReasonSubscriptionNodeDiscovered {
+			t.Fatalf("expected replacement node reason subscription_node_discovered, got %q", reasonByID[nodeID])
+		}
+		if subscriptionByID[nodeID] != sub.ID {
+			t.Fatalf("expected replacement node subscription ID %q, got %q", sub.ID, subscriptionByID[nodeID])
+		}
+	}
+	if replacementCount != 1 {
+		t.Fatalf("expected 1 replacement node, got %d", replacementCount)
+	}
+
+	if len(handlerStub.addedTags) != 2 {
+		t.Fatalf("expected two outbound registrations after URL update, got %v", handlerStub.addedTags)
+	}
+}
+
+func TestSubscriptionManagerUpdateSubscriptionRejectsDuplicateURL(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	handlerStub := &stubHandlerServiceClient{}
+	sm := NewSubscriptionManager(configPath, &GRPCClient{handlerClient: handlerStub}, nil, nil)
+	defer sm.Stop()
+
+	serverA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(
+			"vless://44444444-4444-4444-4444-444444444444@dup-a.example.com:443?security=tls&sni=dup-a.example.com#dup-a\n",
+		))
+	}))
+	defer serverA.Close()
+
+	serverB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(
+			"vless://55555555-5555-5555-5555-555555555555@dup-b.example.com:443?security=tls&sni=dup-b.example.com#dup-b\n",
+		))
+	}))
+	defer serverB.Close()
+
+	first, err := sm.AddSubscription(SubscriptionInput{
+		SourceType:      SubscriptionSourceURL,
+		URL:             serverA.URL,
+		Remark:          "first",
+		AutoRefresh:     false,
+		RefreshInterval: 60,
+	})
+	if err != nil {
+		t.Fatalf("add first subscription: %v", err)
+	}
+	second, err := sm.AddSubscription(SubscriptionInput{
+		SourceType:      SubscriptionSourceURL,
+		URL:             serverB.URL,
+		Remark:          "second",
+		AutoRefresh:     false,
+		RefreshInterval: 60,
+	})
+	if err != nil {
+		t.Fatalf("add second subscription: %v", err)
+	}
+
+	if _, err := sm.UpdateSubscription(first.ID, SubscriptionUpdateInput{URL: stringPtr(serverB.URL)}); err == nil {
+		t.Fatal("expected duplicate URL update to fail")
+	}
+
+	listed := sm.ListSubscriptions()
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 subscriptions, got %d", len(listed))
+	}
+	urlByID := map[string]string{}
+	for _, sub := range listed {
+		urlByID[sub.ID] = sub.URL
+	}
+	if urlByID[first.ID] != serverA.URL {
+		t.Fatalf("expected first subscription URL to remain %q, got %q", serverA.URL, urlByID[first.ID])
+	}
+	if urlByID[second.ID] != serverB.URL {
+		t.Fatalf("expected second subscription URL to remain %q, got %q", serverB.URL, urlByID[second.ID])
+	}
+}
+
+func TestSubscriptionManagerUpdateManualSubscriptionOnlyAllowsRemark(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	sm := NewSubscriptionManager(configPath, nil, nil, nil)
+	defer sm.Stop()
+
+	sub, err := sm.AddSubscription(SubscriptionInput{
+		SourceType: SubscriptionSourceManual,
+		Content:    "vless://88888888-8888-8888-8888-888888888888@manual.example.com:443?security=tls&sni=manual.example.com#manual-node",
+		Remark:     "manual source",
+	})
+	if err != nil {
+		t.Fatalf("add manual subscription: %v", err)
+	}
+
+	updated, err := sm.UpdateSubscription(sub.ID, SubscriptionUpdateInput{
+		SourceType: sourceTypePtr(SubscriptionSourceManual),
+		Remark:     stringPtr("manual source updated"),
+	})
+	if err != nil {
+		t.Fatalf("update manual remark: %v", err)
+	}
+	if updated.ID != sub.ID {
+		t.Fatalf("expected ID %q to remain unchanged, got %q", sub.ID, updated.ID)
+	}
+	if updated.Remark != "manual source updated" {
+		t.Fatalf("expected updated remark, got %q", updated.Remark)
+	}
+
+	if _, err := sm.UpdateSubscription(sub.ID, SubscriptionUpdateInput{
+		URL: stringPtr("https://example.com/sub.txt"),
+	}); err == nil {
+		t.Fatal("expected manual source URL update to fail")
+	}
+	if _, err := sm.UpdateSubscription(sub.ID, SubscriptionUpdateInput{
+		AutoRefresh: boolPtr(true),
+	}); err == nil {
+		t.Fatal("expected manual source autoRefresh update to fail")
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
+func sourceTypePtr(value SubscriptionSourceType) *SubscriptionSourceType {
+	return &value
 }
 
 func timePtr(value time.Time) *time.Time {

@@ -237,7 +237,11 @@
     "lastRefresh": "Last Refresh",
     "nodeCount": "Nodes",
     "addSubscription": "Add Subscription",
+    "editSubscription": "Edit Subscription",
     "deleteConfirm": "Are you sure to delete this subscription and all its nodes?",
+    "pause": "Pause",
+    "resume": "Resume",
+    "nonUrlEditHint": "For manual and file imports, this edit dialog only changes the remark. Recreate the source if you need to replace the imported content.",
     "refreshNow": "Refresh Now",
     "never": "Never",
     "sourceTypeOptions": {

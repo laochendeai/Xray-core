@@ -327,6 +327,125 @@ class WebSmokeTest(unittest.TestCase):
                             {"ids": [node_id]},
                         )
 
+    def test_update_subscription_and_toggle_auto_refresh(self) -> None:
+        initial_link = (
+            "vless://66666666-6666-6666-6666-666666666666@edit-a.example.com:443"
+            "?encryption=none&security=tls&sni=edit-a.example.com&type=tcp#edit-a"
+        )
+        updated_link = (
+            "vless://77777777-7777-7777-7777-777777777777@edit-b.example.com:443"
+            "?encryption=none&security=tls&sni=edit-b.example.com&type=tcp#edit-b"
+        )
+        subscription_id = None
+        original_node_id = None
+        replacement_node_id = None
+
+        with serve_subscription_content(f"{initial_link}\n") as (subscription_url_a, _):
+            with serve_subscription_content(f"{updated_link}\n") as (subscription_url_b, _):
+                try:
+                    created = self.api_json(
+                        "POST",
+                        "/api/v1/subscriptions",
+                        {
+                            "url": subscription_url_a,
+                            "sourceType": "url",
+                            "remark": "editable-subscription",
+                            "autoRefresh": True,
+                            "refreshIntervalMin": 60,
+                        },
+                    )
+                    subscription = created["subscription"]
+                    subscription_id = subscription["id"]
+
+                    initial_pool = self.wait_for_api(
+                        "/api/v1/node-pool",
+                        lambda data: any(item["subscriptionId"] == subscription_id for item in data["nodes"]),
+                    )
+                    original_node = next(
+                        item for item in initial_pool["nodes"] if item["subscriptionId"] == subscription_id
+                    )
+                    original_node_id = original_node["id"]
+                    self.assertEqual(original_node["address"], "edit-a.example.com")
+
+                    updated = self.api_json(
+                        "PUT",
+                        f"/api/v1/subscriptions/{subscription_id}",
+                        {
+                            "sourceType": "url",
+                            "url": subscription_url_b,
+                            "remark": "editable-subscription-updated",
+                            "autoRefresh": False,
+                            "refreshIntervalMin": 120,
+                        },
+                    )
+                    updated_subscription = updated["subscription"]
+                    self.assertEqual(updated_subscription["id"], subscription_id)
+                    self.assertEqual(updated_subscription["url"], subscription_url_b)
+                    self.assertEqual(updated_subscription["remark"], "editable-subscription-updated")
+                    self.assertFalse(updated_subscription["autoRefresh"])
+                    self.assertEqual(updated_subscription["refreshIntervalMin"], 120)
+
+                    reconciled_pool = self.wait_for_api(
+                        "/api/v1/node-pool",
+                        lambda data: any(
+                            item["id"] == original_node_id
+                            and item["status"] == "candidate"
+                            and item["statusReason"] == "subscription_missing"
+                            for item in data["nodes"]
+                        )
+                        and any(
+                            item["subscriptionId"] == subscription_id and item["address"] == "edit-b.example.com"
+                            for item in data["nodes"]
+                        ),
+                    )
+                    replacement_node = next(
+                        item
+                        for item in reconciled_pool["nodes"]
+                        if item["subscriptionId"] == subscription_id and item["address"] == "edit-b.example.com"
+                    )
+                    replacement_node_id = replacement_node["id"]
+                    self.assertEqual(replacement_node["status"], "staging")
+
+                    listed = self.api_get("/api/v1/subscriptions")
+                    listed_subscription = next(
+                        item for item in listed["subscriptions"] if item["id"] == subscription_id
+                    )
+                    self.assertEqual(listed_subscription["url"], subscription_url_b)
+                    self.assertFalse(listed_subscription["autoRefresh"])
+                    self.assertEqual(listed_subscription["refreshIntervalMin"], 120)
+
+                    resumed = self.api_json(
+                        "PUT",
+                        f"/api/v1/subscriptions/{subscription_id}",
+                        {
+                            "sourceType": "url",
+                            "autoRefresh": True,
+                        },
+                    )
+                    resumed_subscription = resumed["subscription"]
+                    self.assertEqual(resumed_subscription["id"], subscription_id)
+                    self.assertTrue(resumed_subscription["autoRefresh"])
+                    self.assertEqual(resumed_subscription["refreshIntervalMin"], 120)
+
+                    listed = self.api_get("/api/v1/subscriptions")
+                    listed_subscription = next(
+                        item for item in listed["subscriptions"] if item["id"] == subscription_id
+                    )
+                    self.assertTrue(listed_subscription["autoRefresh"])
+                    self.assertEqual(listed_subscription["refreshIntervalMin"], 120)
+                finally:
+                    if subscription_id is not None:
+                        with contextlib.suppress(Exception):
+                            self.api_json("DELETE", f"/api/v1/subscriptions/{subscription_id}")
+                    removable_ids = [node_id for node_id in (original_node_id, replacement_node_id) if node_id]
+                    if removable_ids:
+                        with contextlib.suppress(Exception):
+                            self.api_json(
+                                "POST",
+                                "/api/v1/node-pool/bulk-purge-removed",
+                                {"ids": removable_ids},
+                            )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

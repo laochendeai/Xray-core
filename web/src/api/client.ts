@@ -1,7 +1,8 @@
 import axios from 'axios'
 import type {
   NodePoolDashboardResponse,
-  SubscriptionSourceType,
+  SubscriptionCreateRequest,
+  SubscriptionUpdateRequest,
   TunEditableSettings,
   TunStatusResponse,
   UpdateStatusResponse,
@@ -116,16 +117,10 @@ export const shareAPI = {
 
 export const subscriptionAPI = {
   list: () => apiClient.get('/subscriptions') as Promise<any>,
-  add: (data: {
-    url?: string
-    content?: string
-    sourceName?: string
-    sourceType?: SubscriptionSourceType
-    remark: string
-    autoRefresh: boolean
-    refreshIntervalMin: number
-  }) =>
+  add: (data: SubscriptionCreateRequest) =>
     apiClient.post('/subscriptions', data) as Promise<any>,
+  update: (id: string, data: SubscriptionUpdateRequest) =>
+    apiClient.put(`/subscriptions/${id}`, data) as Promise<any>,
   delete: (id: string) => apiClient.delete(`/subscriptions/${id}`) as Promise<any>,
   refresh: (id: string) => apiClient.post(`/subscriptions/${id}/refresh`) as Promise<any>
 }
