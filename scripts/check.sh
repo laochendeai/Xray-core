@@ -32,6 +32,12 @@ if [[ ! -d "$ROOT_DIR/web/node_modules" ]]; then
   )
 fi
 
+log "Web tests"
+(
+  cd web
+  npm run test
+)
+
 log "Web build"
 (
   cd web
