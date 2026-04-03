@@ -206,7 +206,7 @@ This repository uses a hard-gated change workflow for local work and PRs.
 - Any change to user-facing UI text must update both [`web/src/i18n/locales/zh-CN.json`](web/src/i18n/locales/zh-CN.json) and [`web/src/i18n/locales/en.json`](web/src/i18n/locales/en.json) in the same PR.
 - Do not merge a change that ships one locale ahead of the other.
 
-`scripts/check.sh` is the single local entry point. It runs the WebPanel Go tests, the frontend production build, and the key-path regression smoke test in [`tests/test_web_smoke.py`](tests/test_web_smoke.py).
+`scripts/check.sh` is the single local entry point. It runs the WebPanel Go tests, the frontend Vitest suite, the frontend production build, and the key-path regression smoke test in [`tests/test_web_smoke.py`](tests/test_web_smoke.py).
 
 Release packaging workflows in [`.github/workflows/release.yml`](.github/workflows/release.yml) and [`.github/workflows/release-win7.yml`](.github/workflows/release-win7.yml) are reserved for version tags, published releases, and manual dispatch, so normal PRs stay on the fast validation path.
 
