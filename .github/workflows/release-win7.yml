@@ -5,8 +5,9 @@ on:
   release:
     types: [published]
   push:
-  pull_request:
-    types: [opened, synchronize, reopened]
+    tags:
+      - "v*"
+      - "V*"
 
 jobs:
   check-assets:

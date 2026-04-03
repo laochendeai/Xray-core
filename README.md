@@ -199,7 +199,7 @@ This repository uses a hard-gated change workflow for local work and PRs.
 3. Make the change.
 4. Run `bash scripts/check.sh`.
 5. Push. The local pre-push hook in [`.githooks/pre-push`](.githooks/pre-push) runs the same check again.
-6. Open a PR with [`.github/pull_request_template.md`](.github/pull_request_template.md), include `Closes #<issue-number>` in the PR body, and wait for [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to pass.
+6. Open a PR with [`.github/pull_request_template.md`](.github/pull_request_template.md), include `Closes #<issue-number>` in the PR body, and wait for the required GitHub Actions checks to pass.
 
 ### UI Text / i18n Rule
 
@@ -207,6 +207,8 @@ This repository uses a hard-gated change workflow for local work and PRs.
 - Do not merge a change that ships one locale ahead of the other.
 
 `scripts/check.sh` is the single local entry point. It runs the WebPanel Go tests, the frontend production build, and the key-path regression smoke test in [`tests/test_web_smoke.py`](tests/test_web_smoke.py).
+
+Release packaging workflows in [`.github/workflows/release.yml`](.github/workflows/release.yml) and [`.github/workflows/release-win7.yml`](.github/workflows/release-win7.yml) are reserved for version tags, published releases, and manual dispatch, so normal PRs stay on the fast validation path.
 
 Fresh clones should install the shared hook path once:
 
