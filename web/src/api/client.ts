@@ -4,6 +4,7 @@ import type {
   SubscriptionSourceType,
   TunEditableSettings,
   TunStatusResponse,
+  UpdateStatusResponse,
   ValidationConfig
 } from './types'
 
@@ -40,6 +41,8 @@ export const authAPI = {
 
 export const statsAPI = {
   getSysStats: () => apiClient.get('/sys/stats') as Promise<any>,
+  getUpdateStatus: (refresh = false) =>
+    apiClient.get('/sys/update', { params: refresh ? { refresh: true } : {} }) as Promise<UpdateStatusResponse>,
   queryStats: (pattern?: string) =>
     apiClient.get('/stats/query', { params: { pattern } }) as Promise<any>,
   getOnlineUsers: () => apiClient.get('/stats/online-users') as Promise<any>,

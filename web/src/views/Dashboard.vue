@@ -1,6 +1,5 @@
 <template>
   <n-space vertical :size="24">
-    <!-- System Info Cards -->
     <n-grid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi span="4 m:1">
         <n-card size="small">
@@ -32,7 +31,58 @@
       </n-gi>
     </n-grid>
 
-    <!-- Traffic Overview -->
+    <n-card :title="t('dashboard.updateStatusTitle')" size="small">
+      <template #header-extra>
+        <n-space align="center" :size="12">
+          <n-tag :type="updateBadge.type" size="small">
+            {{ updateBadge.label }}
+          </n-tag>
+          <n-button size="small" @click="fetchUpdateStatus(true)" :loading="loadingUpdate">
+            {{ t('dashboard.checkUpdates') }}
+          </n-button>
+        </n-space>
+      </template>
+
+      <n-space vertical :size="12">
+        <n-alert type="info">
+          {{ t('dashboard.updateHint') }}
+        </n-alert>
+
+        <n-descriptions bordered :column="1" size="small">
+          <n-descriptions-item :label="t('dashboard.currentVersion')">
+            {{ updateStatus?.currentVersion || '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item :label="t('dashboard.latestVersion')">
+            {{ updateStatus?.latestVersion || '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item :label="t('dashboard.releaseSource')">
+            {{ updateStatus?.source || '-' }}
+          </n-descriptions-item>
+          <n-descriptions-item :label="t('dashboard.releaseDate')">
+            {{ formatDateTime(updateStatus?.latestPublishedAt) }}
+          </n-descriptions-item>
+          <n-descriptions-item :label="t('dashboard.lastChecked')">
+            {{ formatDateTime(updateStatus?.checkedAt) }}
+          </n-descriptions-item>
+          <n-descriptions-item :label="t('dashboard.releasePage')">
+            <a
+              v-if="updateStatus?.latestReleaseUrl"
+              :href="updateStatus.latestReleaseUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {{ t('dashboard.openReleasePage') }}
+            </a>
+            <span v-else>-</span>
+          </n-descriptions-item>
+        </n-descriptions>
+
+        <n-alert v-if="updateStatus?.message" :type="updateStatus.status === 'error' ? 'error' : 'warning'">
+          {{ updateStatus.message }}
+        </n-alert>
+      </n-space>
+    </n-card>
+
     <n-grid :cols="2" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi span="2 m:1">
         <n-card :title="t('dashboard.trafficOverview')" size="small">
@@ -58,13 +108,28 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { NSpace, NGrid, NGi, NCard, NStatistic, NDataTable, type DataTableColumns } from 'naive-ui'
+import {
+  NSpace,
+  NGrid,
+  NGi,
+  NCard,
+  NStatistic,
+  NDataTable,
+  NAlert,
+  NButton,
+  NDescriptions,
+  NDescriptionsItem,
+  NTag,
+  type DataTableColumns
+} from 'naive-ui'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { useI18n } from 'vue-i18n'
+import { statsAPI } from '@/api/client'
+import type { UpdateStatusResponse } from '@/api/types'
 import { useStatsStore } from '@/stores/stats'
 import { formatBytes, formatUptime } from '@/utils/format'
 
@@ -79,6 +144,8 @@ const totalUplink = ref(0)
 const totalDownlink = ref(0)
 const trafficHistory = ref<{ time: string; up: number; down: number }[]>([])
 const topUsers = ref<any[]>([])
+const updateStatus = ref<UpdateStatusResponse | null>(null)
+const loadingUpdate = ref(false)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -130,6 +197,29 @@ async function fetchData() {
   }
 }
 
+async function fetchUpdateStatus(force = false) {
+  loadingUpdate.value = true
+  try {
+    updateStatus.value = await statsAPI.getUpdateStatus(force)
+  } catch (err: any) {
+    updateStatus.value = {
+      currentVersion: updateStatus.value?.currentVersion || '-',
+      latestVersion: updateStatus.value?.latestVersion,
+      releaseTitle: updateStatus.value?.releaseTitle,
+      latestReleaseUrl: updateStatus.value?.latestReleaseUrl,
+      latestPublishedAt: updateStatus.value?.latestPublishedAt,
+      checkedAt: updateStatus.value?.checkedAt,
+      source: updateStatus.value?.source || 'XTLS/Xray-core',
+      status: 'error',
+      message: err?.error || t('dashboard.updateCheckUnavailable'),
+      updateAvailable: false,
+      stale: Boolean(updateStatus.value)
+    }
+  } finally {
+    loadingUpdate.value = false
+  }
+}
+
 const trafficChartOption = computed(() => ({
   tooltip: { trigger: 'axis' },
   legend: { data: [t('dashboard.totalUpload'), t('dashboard.totalDownload')] },
@@ -151,8 +241,35 @@ const topUserColumns: DataTableColumns = [
   { title: t('dashboard.totalDownload'), key: 'downlink', render: (row: any) => formatBytes(row.downlink) }
 ]
 
+const updateBadge = computed(() => {
+  if (loadingUpdate.value) {
+    return { type: 'info' as const, label: t('common.loading') }
+  }
+  if (!updateStatus.value) {
+    return { type: 'default' as const, label: '-' }
+  }
+  if (updateStatus.value.status === 'error') {
+    return { type: 'error' as const, label: t('dashboard.updateCheckUnavailable') }
+  }
+  if (updateStatus.value.status === 'stale') {
+    return { type: 'warning' as const, label: t('dashboard.updateStatusStale') }
+  }
+  if (updateStatus.value.updateAvailable) {
+    return { type: 'warning' as const, label: t('dashboard.updateAvailable') }
+  }
+  return { type: 'success' as const, label: t('dashboard.upToDate') }
+})
+
+function formatDateTime(value?: string) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString()
+}
+
 onMounted(() => {
   fetchData()
+  fetchUpdateStatus()
   pollTimer = setInterval(fetchData, 5000)
 })
 

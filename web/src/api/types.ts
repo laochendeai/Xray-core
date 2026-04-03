@@ -11,6 +11,20 @@ export interface SysStats {
   uptime: number
 }
 
+export interface UpdateStatusResponse {
+  currentVersion: string
+  latestVersion?: string
+  releaseTitle?: string
+  latestReleaseUrl?: string
+  latestPublishedAt?: string
+  checkedAt?: string
+  source: string
+  status: 'ok' | 'stale' | 'error'
+  message?: string
+  updateAvailable: boolean
+  stale: boolean
+}
+
 export interface StatItem {
   name: string
   value: number
