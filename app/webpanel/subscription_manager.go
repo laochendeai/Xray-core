@@ -173,6 +173,14 @@ type SubscriptionInput struct {
 	RefreshInterval int
 }
 
+type SubscriptionUpdateInput struct {
+	SourceType      *SubscriptionSourceType
+	URL             *string
+	Remark          *string
+	AutoRefresh     *bool
+	RefreshInterval *int
+}
+
 // NodeRecord represents a node in the pool.
 type NodeRecord struct {
 	ID               string            `json:"id"`
@@ -213,19 +221,19 @@ type ValidationConfig struct {
 
 // SubscriptionManager manages subscriptions and the node pool lifecycle.
 type SubscriptionManager struct {
-	mu                 sync.RWMutex
-	state              *NodePoolState
-	statePath          string
-	grpcClient         *GRPCClient
-	prober             *NodeProber
-	instance           *core.Instance
-	runtimeCtx         context.Context
-	stopCh             chan struct{}
-	refreshMu          sync.Mutex
-	saveCh             chan struct{}
-	saveDelay          time.Duration
-	onPoolHealthChange func(PoolHealthSummary)
-	bgWG               sync.WaitGroup
+	mu                  sync.RWMutex
+	state               *NodePoolState
+	statePath           string
+	grpcClient          *GRPCClient
+	prober              *NodeProber
+	instance            *core.Instance
+	runtimeCtx          context.Context
+	stopCh              chan struct{}
+	refreshMu           sync.Mutex
+	saveCh              chan struct{}
+	saveDelay           time.Duration
+	onPoolHealthChange  func(PoolHealthSummary)
+	bgWG                sync.WaitGroup
 }
 
 const (
@@ -350,8 +358,7 @@ func (sm *SubscriptionManager) ListSubscriptions() []SubscriptionRecord {
 	result := make([]SubscriptionRecord, len(sm.state.Subscriptions))
 	copy(result, sm.state.Subscriptions)
 	for i := range result {
-		result[i].SourceType = normalizeSubscriptionSourceType(result[i].SourceType)
-		result[i].Content = ""
+		result[i] = copySubscriptionRecordForAPI(result[i])
 		count := 0
 		for _, n := range sm.state.Nodes {
 			if n.SubscriptionID == result[i].ID && isCountedSubscriptionNode(n) {
@@ -371,17 +378,15 @@ func (sm *SubscriptionManager) AddSubscription(input SubscriptionInput) (*Subscr
 	}
 
 	sm.mu.Lock()
-	for _, s := range sm.state.Subscriptions {
-		if s.ID == rec.ID {
-			sm.mu.Unlock()
-			return nil, fmt.Errorf("subscription already exists")
-		}
+	if sm.subscriptionSourceExistsLocked(rec, "") {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("subscription already exists")
 	}
 	sm.state.Subscriptions = append(sm.state.Subscriptions, rec)
 	sm.writeStateLocked()
 	sm.mu.Unlock()
 
-	if err := sm.refreshSubscription(rec.ID); err != nil {
+	if err := sm.RefreshSubscription(rec.ID); err != nil {
 		sm.mu.Lock()
 		sm.removeSubscriptionLocked(rec.ID)
 		sm.writeStateLocked()
@@ -393,12 +398,103 @@ func (sm *SubscriptionManager) AddSubscription(input SubscriptionInput) (*Subscr
 	defer sm.mu.RUnlock()
 	for _, s := range sm.state.Subscriptions {
 		if s.ID == rec.ID {
-			copyRec := s
-			copyRec.Content = ""
+			copyRec := copySubscriptionRecordForAPI(s)
 			return &copyRec, nil
 		}
 	}
 	return nil, fmt.Errorf("subscription disappeared after creation")
+}
+
+func (sm *SubscriptionManager) UpdateSubscription(id string, input SubscriptionUpdateInput) (*SubscriptionRecord, error) {
+	sm.refreshMu.Lock()
+	defer sm.refreshMu.Unlock()
+
+	sm.mu.Lock()
+	idx := sm.findSubscriptionIndexLocked(id)
+	if idx < 0 {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("subscription not found")
+	}
+
+	current := sm.state.Subscriptions[idx]
+	current.SourceType = normalizeSubscriptionSourceType(current.SourceType)
+	updated := current
+
+	if input.SourceType != nil {
+		requestedType := normalizeSubscriptionSourceType(*input.SourceType)
+		if requestedType != current.SourceType {
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("subscription source type cannot be changed")
+		}
+	}
+	if input.Remark != nil {
+		updated.Remark = strings.TrimSpace(*input.Remark)
+	}
+
+	requiresRefresh := false
+	switch current.SourceType {
+	case SubscriptionSourceURL:
+		if input.URL != nil {
+			updatedURL := strings.TrimSpace(*input.URL)
+			if updatedURL == "" {
+				sm.mu.Unlock()
+				return nil, fmt.Errorf("subscription URL is required")
+			}
+			if updated.URL != updatedURL {
+				updated.URL = updatedURL
+				requiresRefresh = true
+			}
+		}
+		if input.AutoRefresh != nil {
+			updated.AutoRefresh = *input.AutoRefresh
+		}
+		if input.RefreshInterval != nil {
+			updated.RefreshInterval = *input.RefreshInterval
+		}
+	case SubscriptionSourceManual, SubscriptionSourceFile:
+		if input.URL != nil {
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("only URL subscriptions support URL updates")
+		}
+		if input.AutoRefresh != nil || input.RefreshInterval != nil {
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("only URL subscriptions support refresh policy updates")
+		}
+	default:
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("unsupported subscription source type: %s", current.SourceType)
+	}
+
+	normalizeSubscriptionRecord(&updated)
+	if sm.subscriptionSourceExistsLocked(updated, id) {
+		sm.mu.Unlock()
+		return nil, fmt.Errorf("subscription already exists")
+	}
+
+	sm.state.Subscriptions[idx] = updated
+	sm.writeStateLocked()
+	sm.mu.Unlock()
+
+	if requiresRefresh {
+		if err := sm.refreshSubscriptionLocked(id); err != nil {
+			sm.mu.Lock()
+			if rollbackIdx := sm.findSubscriptionIndexLocked(id); rollbackIdx >= 0 {
+				sm.state.Subscriptions[rollbackIdx] = current
+				sm.writeStateLocked()
+			}
+			sm.mu.Unlock()
+			return nil, fmt.Errorf("failed to refresh updated subscription: %w", err)
+		}
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	idx = sm.findSubscriptionIndexLocked(id)
+	if idx < 0 {
+		return nil, fmt.Errorf("subscription disappeared after update")
+	}
+	copyRec := copySubscriptionRecordForAPI(sm.state.Subscriptions[idx])
+	return &copyRec, nil
 }
 
 // DeleteSubscription removes a subscription and marks its nodes removed.
@@ -436,7 +532,9 @@ func (sm *SubscriptionManager) DeleteSubscription(id string) error {
 
 // RefreshSubscription triggers a refresh of a specific subscription.
 func (sm *SubscriptionManager) RefreshSubscription(id string) error {
-	return sm.refreshSubscription(id)
+	sm.refreshMu.Lock()
+	defer sm.refreshMu.Unlock()
+	return sm.refreshSubscriptionLocked(id)
 }
 
 // ListNodes returns nodes filtered by status (empty string = all).
@@ -834,10 +932,7 @@ func (sm *SubscriptionManager) BulkRemove(filter BulkRemoveFilter) (int, error) 
 	return removed, nil
 }
 
-func (sm *SubscriptionManager) refreshSubscription(id string) error {
-	sm.refreshMu.Lock()
-	defer sm.refreshMu.Unlock()
-
+func (sm *SubscriptionManager) refreshSubscriptionLocked(id string) error {
 	sm.mu.RLock()
 	var sub *SubscriptionRecord
 	for i := range sm.state.Subscriptions {
@@ -1226,6 +1321,27 @@ func (sm *SubscriptionManager) removeSubscriptionLocked(id string) {
 	sm.state.Subscriptions = remaining
 }
 
+func (sm *SubscriptionManager) findSubscriptionIndexLocked(id string) int {
+	for i := range sm.state.Subscriptions {
+		if sm.state.Subscriptions[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (sm *SubscriptionManager) subscriptionSourceExistsLocked(candidate SubscriptionRecord, excludeID string) bool {
+	for _, existing := range sm.state.Subscriptions {
+		if existing.ID == excludeID {
+			continue
+		}
+		if sameSubscriptionSource(existing, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 func (sm *SubscriptionManager) findNodeByTag(tag string) int {
 	for i, n := range sm.state.Nodes {
 		if n.OutboundTag == tag {
@@ -1256,7 +1372,7 @@ func (sm *SubscriptionManager) autoRefreshLoop() {
 				if sub.LastRefresh != nil && time.Since(*sub.LastRefresh) < time.Duration(sub.RefreshInterval)*time.Minute {
 					continue
 				}
-				if err := sm.refreshSubscription(sub.ID); err != nil {
+				if err := sm.RefreshSubscription(sub.ID); err != nil {
 					errors.LogWarning(context.Background(), "node pool: auto-refresh failed for ", sub.Remark, ": ", err.Error())
 				}
 			}
@@ -1543,6 +1659,29 @@ func buildSubscriptionRecord(input SubscriptionInput) (SubscriptionRecord, error
 	}
 
 	return rec, nil
+}
+
+func copySubscriptionRecordForAPI(sub SubscriptionRecord) SubscriptionRecord {
+	sub.SourceType = normalizeSubscriptionSourceType(sub.SourceType)
+	sub.Content = ""
+	return sub
+}
+
+func sameSubscriptionSource(a, b SubscriptionRecord) bool {
+	sourceType := normalizeSubscriptionSourceType(a.SourceType)
+	if sourceType != normalizeSubscriptionSourceType(b.SourceType) {
+		return false
+	}
+
+	switch sourceType {
+	case SubscriptionSourceURL:
+		return strings.TrimSpace(a.URL) == strings.TrimSpace(b.URL)
+	case SubscriptionSourceManual, SubscriptionSourceFile:
+		return strings.TrimSpace(a.SourceName) == strings.TrimSpace(b.SourceName) &&
+			strings.TrimSpace(trimUTF8BOM(a.Content)) == strings.TrimSpace(trimUTF8BOM(b.Content))
+	default:
+		return false
+	}
 }
 
 func normalizeSubscriptionRecord(sub *SubscriptionRecord) bool {

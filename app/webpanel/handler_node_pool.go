@@ -20,7 +20,7 @@ func (wp *WebPanel) handleSubscriptions(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// handleSubscriptionByID handles DELETE /api/v1/subscriptions/:id and POST /api/v1/subscriptions/:id/refresh.
+// handleSubscriptionByID handles PUT /api/v1/subscriptions/:id, DELETE, and POST /api/v1/subscriptions/:id/refresh.
 func (wp *WebPanel) handleSubscriptionByID(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/subscriptions/")
 	parts := strings.SplitN(path, "/", 2)
@@ -42,6 +42,8 @@ func (wp *WebPanel) handleSubscriptionByID(w http.ResponseWriter, r *http.Reques
 	}
 
 	switch r.Method {
+	case http.MethodPut:
+		wp.updateSubscriptionHandler(w, r, id)
 	case http.MethodDelete:
 		wp.deleteSubscriptionHandler(w, r, id)
 	default:
@@ -118,6 +120,52 @@ func (wp *WebPanel) deleteSubscriptionHandler(w http.ResponseWriter, r *http.Req
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Subscription deleted successfully",
+	})
+}
+
+func (wp *WebPanel) updateSubscriptionHandler(w http.ResponseWriter, r *http.Request, id string) {
+	if wp.subManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "subscription manager not initialized")
+		return
+	}
+
+	var req struct {
+		SourceType      *string `json:"sourceType"`
+		URL             *string `json:"url"`
+		Remark          *string `json:"remark"`
+		AutoRefresh     *bool   `json:"autoRefresh"`
+		RefreshInterval *int    `json:"refreshIntervalMin"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	var sourceType *SubscriptionSourceType
+	if req.SourceType != nil {
+		value := SubscriptionSourceType(strings.TrimSpace(*req.SourceType))
+		sourceType = &value
+	}
+
+	sub, err := wp.subManager.UpdateSubscription(id, SubscriptionUpdateInput{
+		SourceType:      sourceType,
+		URL:             req.URL,
+		Remark:          req.Remark,
+		AutoRefresh:     req.AutoRefresh,
+		RefreshInterval: req.RefreshInterval,
+	})
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":      "Subscription updated successfully",
+		"subscription": sub,
 	})
 }
 

@@ -108,6 +108,24 @@ export interface SubscriptionRecord {
   nodeCount: number
 }
 
+export interface SubscriptionUpdateRequest {
+  sourceType?: SubscriptionSourceType
+  url?: string
+  remark?: string
+  autoRefresh?: boolean
+  refreshIntervalMin?: number
+}
+
+export interface SubscriptionCreateRequest {
+  url?: string
+  content?: string
+  sourceName?: string
+  sourceType?: SubscriptionSourceType
+  remark: string
+  autoRefresh: boolean
+  refreshIntervalMin: number
+}
+
 export type NodeStatus = 'candidate' | 'staging' | 'active' | 'quarantine' | 'removed'
 export type TransitionReason =
   | 'subscription_node_discovered'

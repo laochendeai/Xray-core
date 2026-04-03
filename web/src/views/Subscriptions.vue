@@ -2,28 +2,33 @@
   <n-space vertical :size="16">
     <n-space justify="space-between" align="center">
       <h2>{{ t('subscriptions.title') }}</h2>
-      <n-button type="primary" @click="showAdd = true">{{ t('subscriptions.addSubscription') }}</n-button>
+      <n-button type="primary" @click="openAddDialog">{{ t('subscriptions.addSubscription') }}</n-button>
     </n-space>
 
     <n-data-table :columns="columns" :data="subscriptions" :loading="loading" :pagination="{ pageSize: 20 }" />
 
     <n-modal
-      :show="showAdd"
+      :show="showDialog"
       preset="dialog"
-      :title="t('subscriptions.addSubscription')"
+      :title="dialogTitle"
       style="width: 640px"
-      @update:show="handleShowAddChange"
+      @update:show="handleDialogVisibilityChange"
     >
       <n-form :model="form" label-placement="left" label-width="auto">
         <n-form-item :label="t('subscriptions.sourceType')">
-          <n-select v-model:value="form.sourceType" :options="sourceTypeOptions" @update:value="handleSourceTypeChange" />
+          <n-select
+            v-model:value="form.sourceType"
+            :options="sourceTypeOptions"
+            :disabled="isEditing"
+            @update:value="handleSourceTypeChange"
+          />
         </n-form-item>
 
         <n-form-item v-if="form.sourceType === 'url'" :label="t('subscriptions.url')">
           <n-input v-model:value="form.url" placeholder="https://..." />
         </n-form-item>
 
-        <n-form-item v-else-if="form.sourceType === 'manual'" :label="t('subscriptions.manualContent')">
+        <n-form-item v-else-if="!isEditing && form.sourceType === 'manual'" :label="t('subscriptions.manualContent')">
           <n-input
             v-model:value="form.content"
             type="textarea"
@@ -32,7 +37,7 @@
           />
         </n-form-item>
 
-        <n-form-item v-else :label="t('subscriptions.localFile')">
+        <n-form-item v-else-if="!isEditing && form.sourceType === 'file'" :label="t('subscriptions.localFile')">
           <n-space vertical :size="8" class="file-import-block">
             <input ref="fileInputRef" class="hidden-file-input" type="file" :accept="fileAccept" @change="handleFilePicked" />
             <n-space align="center" wrap>
@@ -45,22 +50,31 @@
           </n-space>
         </n-form-item>
 
+        <n-form-item v-else-if="isEditing" :label="t('subscriptions.source')">
+          <n-space vertical :size="8" class="file-import-block">
+            <n-input :value="editSourceSummary" readonly />
+            <div v-if="editingSubscription?.sourceType !== 'url'" class="file-import-meta">
+              {{ t('subscriptions.nonUrlEditHint') }}
+            </div>
+          </n-space>
+        </n-form-item>
+
         <n-form-item :label="t('subscriptions.remark')">
-          <n-input v-model:value="form.remark" placeholder="" />
+          <n-input v-model:value="form.remark" />
         </n-form-item>
 
         <n-form-item v-if="form.sourceType === 'url'" :label="t('subscriptions.autoRefresh')">
           <n-switch v-model:value="form.autoRefresh" />
         </n-form-item>
 
-        <n-form-item v-if="form.sourceType === 'url' && form.autoRefresh" :label="t('subscriptions.refreshInterval')">
+        <n-form-item v-if="form.sourceType === 'url'" :label="t('subscriptions.refreshInterval')">
           <n-input-number v-model:value="form.refreshIntervalMin" :min="5" :max="1440" />
         </n-form-item>
       </n-form>
 
       <template #action>
-        <n-button @click="handleShowAddChange(false)">{{ t('common.cancel') }}</n-button>
-        <n-button type="primary" :loading="saving" @click="handleAdd">{{ t('common.confirm') }}</n-button>
+        <n-button @click="handleDialogVisibilityChange(false)">{{ t('common.cancel') }}</n-button>
+        <n-button type="primary" :loading="saving" @click="handleSubmit">{{ submitLabel }}</n-button>
       </template>
     </n-modal>
   </n-space>
@@ -86,15 +100,21 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { subscriptionAPI } from '@/api/client'
-import type { SubscriptionRecord, SubscriptionSourceType } from '@/api/types'
+import type { SubscriptionRecord, SubscriptionSourceType, SubscriptionUpdateRequest } from '@/api/types'
+
+type DialogMode = 'add' | 'edit'
 
 const { t } = useI18n()
 const message = useMessage()
 
 const subscriptions = ref<SubscriptionRecord[]>([])
 const loading = ref(false)
-const showAdd = ref(false)
+const showDialog = ref(false)
+const dialogMode = ref<DialogMode>('add')
 const saving = ref(false)
+const refreshingId = ref<string | null>(null)
+const toggleLoadingId = ref<string | null>(null)
+const editingSubscription = ref<SubscriptionRecord | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
 const fileAccept = '.txt,.sub,.conf,.json,.yaml,.yml'
@@ -112,6 +132,18 @@ function createDefaultForm() {
 }
 
 const form = ref(createDefaultForm())
+
+const isEditing = computed(() => dialogMode.value === 'edit')
+const dialogTitle = computed(() =>
+  isEditing.value ? t('subscriptions.editSubscription') : t('subscriptions.addSubscription')
+)
+const submitLabel = computed(() => (isEditing.value ? t('common.save') : t('common.confirm')))
+const editSourceSummary = computed(() => {
+  if (!editingSubscription.value) {
+    return '-'
+  }
+  return sourceDisplay(editingSubscription.value)
+})
 
 const sourceTypeOptions = computed(() => [
   { label: t('subscriptions.sourceTypeOptions.url'), value: 'url' as SubscriptionSourceType },
@@ -167,34 +199,66 @@ const columns: DataTableColumns<SubscriptionRecord> = [
   {
     title: () => t('common.actions'),
     key: 'actions',
-    width: 200,
+    width: 320,
     render(row) {
-      return h(NSpace, { size: 'small' }, {
-        default: () => [
+      const actions = [
+        h(
+          NButton,
+          {
+            size: 'small',
+            onClick: () => openEditDialog(row)
+          },
+          { default: () => t('common.edit') }
+        )
+      ]
+
+      if (row.sourceType === 'url') {
+        actions.push(
           h(
             NButton,
             {
               size: 'small',
-              onClick: () => handleRefresh(row.id),
-              loading: refreshingId.value === row.id
+              type: row.autoRefresh ? 'warning' : 'success',
+              loading: toggleLoadingId.value === row.id,
+              onClick: () => handleToggleAutoRefresh(row)
             },
-            { default: () => t('subscriptions.refreshNow') }
-          ),
-          h(
-            NPopconfirm,
-            { onPositiveClick: () => handleDelete(row.id) },
-            {
-              trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => t('common.delete') }),
-              default: () => t('subscriptions.deleteConfirm')
-            }
+            { default: () => (row.autoRefresh ? t('subscriptions.pause') : t('subscriptions.resume')) }
           )
-        ]
-      })
+        )
+      }
+
+      actions.push(
+        h(
+          NButton,
+          {
+            size: 'small',
+            onClick: () => handleRefresh(row.id),
+            loading: refreshingId.value === row.id
+          },
+          { default: () => t('subscriptions.refreshNow') }
+        )
+      )
+      actions.push(
+        h(
+          NPopconfirm,
+          { onPositiveClick: () => handleDelete(row.id) },
+          {
+            trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => t('common.delete') }),
+            default: () => t('subscriptions.deleteConfirm')
+          }
+        )
+      )
+
+      return h(
+        NSpace,
+        { size: 'small', wrap: true },
+        {
+          default: () => actions
+        }
+      )
     }
   }
 ]
-
-const refreshingId = ref<string | null>(null)
 
 function sourceTypeLabel(sourceType: SubscriptionSourceType) {
   return t(`subscriptions.sourceTypeOptions.${sourceType}`)
@@ -221,21 +285,49 @@ function sourceDisplay(row: SubscriptionRecord) {
   return row.url || '-'
 }
 
-function resetForm() {
+function resetDialogState() {
+  dialogMode.value = 'add'
+  editingSubscription.value = null
   form.value = createDefaultForm()
   if (fileInputRef.value) {
     fileInputRef.value.value = ''
   }
 }
 
-function handleShowAddChange(value: boolean) {
-  showAdd.value = value
+function openAddDialog() {
+  resetDialogState()
+  showDialog.value = true
+}
+
+function openEditDialog(row: SubscriptionRecord) {
+  dialogMode.value = 'edit'
+  editingSubscription.value = row
+  form.value = {
+    sourceType: row.sourceType,
+    url: row.url || '',
+    content: '',
+    sourceName: row.sourceName || '',
+    remark: row.remark,
+    autoRefresh: row.autoRefresh,
+    refreshIntervalMin: row.refreshIntervalMin || 60
+  }
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+  }
+  showDialog.value = true
+}
+
+function handleDialogVisibilityChange(value: boolean) {
+  showDialog.value = value
   if (!value) {
-    resetForm()
+    resetDialogState()
   }
 }
 
 function handleSourceTypeChange(value: SubscriptionSourceType) {
+  if (isEditing.value) {
+    return
+  }
   form.value.sourceType = value
   form.value.url = ''
   form.value.content = ''
@@ -282,29 +374,48 @@ async function fetchSubscriptions() {
   }
 }
 
-async function handleAdd() {
+function buildUpdatePayload(): SubscriptionUpdateRequest {
+  const payload: SubscriptionUpdateRequest = {
+    sourceType: form.value.sourceType,
+    remark: form.value.remark
+  }
+
+  if (form.value.sourceType === 'url') {
+    payload.url = form.value.url.trim()
+    payload.autoRefresh = form.value.autoRefresh
+    payload.refreshIntervalMin = form.value.refreshIntervalMin
+  }
+
+  return payload
+}
+
+async function handleSubmit() {
   if (form.value.sourceType === 'url' && !form.value.url.trim()) {
     message.warning(t('subscriptions.urlRequired'))
     return
   }
-  if (form.value.sourceType !== 'url' && !form.value.content.trim()) {
+  if (!isEditing.value && form.value.sourceType !== 'url' && !form.value.content.trim()) {
     message.warning(t('subscriptions.contentRequired'))
     return
   }
 
   saving.value = true
   try {
-    await subscriptionAPI.add({
-      sourceType: form.value.sourceType,
-      url: form.value.sourceType === 'url' ? form.value.url.trim() : undefined,
-      content: form.value.sourceType === 'url' ? undefined : form.value.content,
-      sourceName: form.value.sourceType === 'file' ? form.value.sourceName : undefined,
-      remark: form.value.remark,
-      autoRefresh: form.value.sourceType === 'url' ? form.value.autoRefresh : false,
-      refreshIntervalMin: form.value.sourceType === 'url' ? form.value.refreshIntervalMin : 0
-    })
+    if (isEditing.value && editingSubscription.value) {
+      await subscriptionAPI.update(editingSubscription.value.id, buildUpdatePayload())
+    } else {
+      await subscriptionAPI.add({
+        sourceType: form.value.sourceType,
+        url: form.value.sourceType === 'url' ? form.value.url.trim() : undefined,
+        content: form.value.sourceType === 'url' ? undefined : form.value.content,
+        sourceName: form.value.sourceType === 'file' ? form.value.sourceName : undefined,
+        remark: form.value.remark,
+        autoRefresh: form.value.sourceType === 'url' ? form.value.autoRefresh : false,
+        refreshIntervalMin: form.value.sourceType === 'url' ? form.value.refreshIntervalMin : 0
+      })
+    }
     message.success(t('common.success'))
-    handleShowAddChange(false)
+    handleDialogVisibilityChange(false)
     await fetchSubscriptions()
   } catch (err: any) {
     message.error(err?.error || err?.message || t('common.error'))
@@ -323,6 +434,22 @@ async function handleRefresh(id: string) {
     message.error(err?.error || err?.message || t('common.error'))
   } finally {
     refreshingId.value = null
+  }
+}
+
+async function handleToggleAutoRefresh(row: SubscriptionRecord) {
+  toggleLoadingId.value = row.id
+  try {
+    await subscriptionAPI.update(row.id, {
+      sourceType: row.sourceType,
+      autoRefresh: !row.autoRefresh
+    })
+    message.success(t('common.success'))
+    await fetchSubscriptions()
+  } catch (err: any) {
+    message.error(err?.error || err?.message || t('common.error'))
+  } finally {
+    toggleLoadingId.value = null
   }
 }
 
