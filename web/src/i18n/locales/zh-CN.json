@@ -200,11 +200,15 @@
     "protocol": "协议",
     "listen": "监听地址",
     "port": "端口",
+    "configJson": "入站配置（JSON）",
     "userCount": "用户数",
     "uplink": "上行",
     "downlink": "下行",
     "addInbound": "添加入站",
     "editInbound": "编辑入站",
+    "cloneInbound": "克隆入站",
+    "tagRequired": "标签不能为空。",
+    "invalidConfig": "入站配置 JSON 不合法。",
     "deleteConfirm": "确定要删除此入站吗？"
   },
   "outbounds": {
@@ -213,8 +217,12 @@
     "protocol": "协议",
     "server": "服务器",
     "port": "端口",
+    "configJson": "出站配置（JSON）",
     "addOutbound": "添加出站",
     "editOutbound": "编辑出站",
+    "cloneOutbound": "克隆出站",
+    "tagRequired": "标签不能为空。",
+    "invalidConfig": "出站配置 JSON 不合法。",
     "deleteConfirm": "确定要删除此出站吗？"
   },
   "users": {

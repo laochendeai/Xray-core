@@ -84,6 +84,7 @@ class WebSmokeTest(unittest.TestCase):
 
         api_port = reserve_port()
         web_port = reserve_port()
+        inbound_port = reserve_port()
         cls.base_url = f"http://127.0.0.1:{web_port}"
 
         config = json.loads(BASE_CONFIG.read_text(encoding="utf-8"))
@@ -91,6 +92,18 @@ class WebSmokeTest(unittest.TestCase):
         config["webpanel"]["listen"] = f"127.0.0.1:{web_port}"
         config["webpanel"]["apiEndpoint"] = f"127.0.0.1:{api_port}"
         config["webpanel"]["configPath"] = str(cls.config_path)
+        config["inbounds"] = [
+            {
+                "tag": "smoke-socks",
+                "listen": "127.0.0.1",
+                "port": inbound_port,
+                "protocol": "socks",
+                "settings": {
+                    "auth": "noauth",
+                    "udp": True,
+                },
+            }
+        ]
         cls.config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
         override_binary = os.environ.get("XRAY_SMOKE_BINARY")
@@ -225,6 +238,82 @@ class WebSmokeTest(unittest.TestCase):
         self.assertIn("routeMode", tun_settings)
         self.assertIn("remoteDns", tun_settings)
         self.assertIsInstance(tun_settings["remoteDns"], list)
+
+    def test_edit_and_clone_inbounds_and_outbounds(self) -> None:
+        clone_inbound_tag = "smoke-socks-copy"
+        clone_outbound_tag = "direct-copy"
+        edited_inbound_port = reserve_port()
+        cloned_inbound_port = reserve_port()
+
+        try:
+            inbound_detail = self.api_get("/api/v1/inbounds/smoke-socks")["inbound"]
+            edited_inbound = json.loads(json.dumps(inbound_detail))
+            edited_range = edited_inbound["receiverSettings"]["portList"]["range"][0]
+            from_key = "From" if "From" in edited_range else "from"
+            to_key = "To" if "To" in edited_range else "to"
+            edited_range[from_key] = edited_inbound_port
+            edited_range[to_key] = edited_inbound_port
+            self.api_json(
+                "PUT",
+                "/api/v1/inbounds/smoke-socks",
+                {
+                    "inbound": edited_inbound,
+                },
+            )
+
+            updated_inbound = self.api_get("/api/v1/inbounds/smoke-socks")["inbound"]
+            updated_port = updated_inbound["receiverSettings"]["portList"]["range"][0]
+            self.assertEqual(updated_port[from_key], edited_inbound_port)
+            self.assertEqual(updated_port[to_key], edited_inbound_port)
+
+            cloned_inbound = json.loads(json.dumps(updated_inbound))
+            cloned_inbound["tag"] = clone_inbound_tag
+            cloned_range = cloned_inbound["receiverSettings"]["portList"]["range"][0]
+            cloned_range[from_key] = cloned_inbound_port
+            cloned_range[to_key] = cloned_inbound_port
+            self.api_json(
+                "POST",
+                "/api/v1/inbounds",
+                {
+                    "inbound": cloned_inbound,
+                },
+            )
+
+            inbounds = self.api_get("/api/v1/inbounds")["inbounds"]
+            self.assertTrue(any(item["tag"] == clone_inbound_tag for item in inbounds))
+
+            outbound_detail = self.api_get("/api/v1/outbounds/direct")["outbound"]
+            edited_outbound = json.loads(json.dumps(outbound_detail))
+            edited_outbound.setdefault("proxySettings", {})
+            edited_outbound["proxySettings"]["domainStrategy"] = "USE_IP4"
+            self.api_json(
+                "PUT",
+                "/api/v1/outbounds/direct",
+                {
+                    "outbound": edited_outbound,
+                },
+            )
+
+            updated_outbound = self.api_get("/api/v1/outbounds/direct")["outbound"]
+            self.assertEqual(updated_outbound["proxySettings"]["domainStrategy"], "USE_IP4")
+
+            cloned_outbound = json.loads(json.dumps(updated_outbound))
+            cloned_outbound["tag"] = clone_outbound_tag
+            self.api_json(
+                "POST",
+                "/api/v1/outbounds",
+                {
+                    "outbound": cloned_outbound,
+                },
+            )
+
+            outbounds = self.api_get("/api/v1/outbounds")["outbounds"]
+            self.assertTrue(any(item["tag"] == clone_outbound_tag for item in outbounds))
+        finally:
+            with contextlib.suppress(Exception):
+                self.api_json("DELETE", f"/api/v1/inbounds/{clone_inbound_tag}")
+            with contextlib.suppress(Exception):
+                self.api_json("DELETE", f"/api/v1/outbounds/{clone_outbound_tag}")
 
     def test_add_subscription_refresh_and_remove_node_observe_api_state_change(self) -> None:
         initial_link = (

@@ -58,7 +58,10 @@ export const readinessAPI = {
 
 export const handlerAPI = {
   listInbounds: () => apiClient.get('/inbounds') as Promise<any>,
+  getInbound: (tag: string) => apiClient.get(`/inbounds/${encodeURIComponent(tag)}`) as Promise<any>,
   addInbound: (inbound: any) => apiClient.post('/inbounds', { inbound }) as Promise<any>,
+  updateInbound: (tag: string, inbound: any) =>
+    apiClient.put(`/inbounds/${encodeURIComponent(tag)}`, { inbound }) as Promise<any>,
   removeInbound: (tag: string) => apiClient.delete(`/inbounds/${tag}`) as Promise<any>,
   getInboundUsers: (tag: string) => apiClient.get(`/inbounds/${tag}/users`) as Promise<any>,
   addInboundUser: (tag: string, user: any) =>
@@ -66,7 +69,10 @@ export const handlerAPI = {
   removeInboundUser: (tag: string, email: string) =>
     apiClient.delete(`/inbounds/${tag}/users/${email}`) as Promise<any>,
   listOutbounds: () => apiClient.get('/outbounds') as Promise<any>,
+  getOutbound: (tag: string) => apiClient.get(`/outbounds/${encodeURIComponent(tag)}`) as Promise<any>,
   addOutbound: (outbound: any) => apiClient.post('/outbounds', { outbound }) as Promise<any>,
+  updateOutbound: (tag: string, outbound: any) =>
+    apiClient.put(`/outbounds/${encodeURIComponent(tag)}`, { outbound }) as Promise<any>,
   removeOutbound: (tag: string) => apiClient.delete(`/outbounds/${tag}`) as Promise<any>
 }
 

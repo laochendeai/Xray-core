@@ -200,11 +200,15 @@
     "protocol": "Protocol",
     "listen": "Listen",
     "port": "Port",
+    "configJson": "Inbound Config (JSON)",
     "userCount": "Users",
     "uplink": "Uplink",
     "downlink": "Downlink",
     "addInbound": "Add Inbound",
     "editInbound": "Edit Inbound",
+    "cloneInbound": "Clone Inbound",
+    "tagRequired": "Tag is required.",
+    "invalidConfig": "Invalid inbound config JSON.",
     "deleteConfirm": "Are you sure to delete this inbound?"
   },
   "outbounds": {
@@ -213,8 +217,12 @@
     "protocol": "Protocol",
     "server": "Server",
     "port": "Port",
+    "configJson": "Outbound Config (JSON)",
     "addOutbound": "Add Outbound",
     "editOutbound": "Edit Outbound",
+    "cloneOutbound": "Clone Outbound",
+    "tagRequired": "Tag is required.",
+    "invalidConfig": "Invalid outbound config JSON.",
     "deleteConfirm": "Are you sure to delete this outbound?"
   },
   "users": {

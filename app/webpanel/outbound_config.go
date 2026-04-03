@@ -179,6 +179,10 @@ type standardBlackholeSettings struct {
 }
 
 func decodeOutboundHandlerConfig(raw json.RawMessage) (*core.OutboundHandlerConfig, error) {
+	if outboundConfig, ok, err := decodeEditableOutboundHandlerConfig(raw); ok || err != nil {
+		return outboundConfig, err
+	}
+
 	var outboundConfig core.OutboundHandlerConfig
 	if err := protojson.Unmarshal(raw, &outboundConfig); err == nil {
 		return &outboundConfig, nil
