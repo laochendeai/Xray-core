@@ -23,6 +23,14 @@ type ProbeResult struct {
 // ProbeCallback is called after each probe round with results.
 type ProbeCallback func(results []ProbeResult)
 
+// NodeProberSnapshot is a read-only snapshot used by diagnostics surfaces.
+type NodeProberSnapshot struct {
+	Running     bool   `json:"running"`
+	ProbeURL    string `json:"probeUrl"`
+	IntervalSec int    `json:"intervalSec"`
+	TagCount    int    `json:"tagCount"`
+}
+
 // NodeProber performs periodic health checks on nodes via their outbound tags.
 type NodeProber struct {
 	mu         sync.RWMutex
@@ -120,6 +128,24 @@ func (p *NodeProber) GetTags() []string {
 		tags = append(tags, t)
 	}
 	return tags
+}
+
+// Snapshot returns the current diagnostics state of the prober.
+func (p *NodeProber) Snapshot() NodeProberSnapshot {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	intervalSec := 0
+	if p.interval > 0 {
+		intervalSec = int(p.interval / time.Second)
+	}
+
+	return NodeProberSnapshot{
+		Running:     p.running,
+		ProbeURL:    p.probeURL,
+		IntervalSec: intervalSec,
+		TagCount:    len(p.tags),
+	}
 }
 
 func (p *NodeProber) loop() {

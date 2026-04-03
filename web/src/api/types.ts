@@ -25,6 +25,26 @@ export interface UpdateStatusResponse {
   stale: boolean
 }
 
+export type ReadinessSeverity = 'ok' | 'warning' | 'blocking'
+export type ReadinessArea = 'config' | 'subscriptions' | 'node_pool' | 'tun' | 'runtime' | 'updates'
+export type ReadinessFacts = Record<string, unknown>
+
+export interface ReadinessCheck {
+  key: string
+  area: ReadinessArea
+  severity: ReadinessSeverity
+  actionRoute?: string
+  facts?: ReadinessFacts
+}
+
+export interface ReadinessResponse {
+  healthy: boolean
+  blockingCount: number
+  warningCount: number
+  updatedAt: string
+  checks: ReadinessCheck[]
+}
+
 export interface StatItem {
   name: string
   value: number

@@ -15,6 +15,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/dashboard' },
       { path: 'dashboard', name: 'Dashboard', component: () => import('@/views/Dashboard.vue') },
+      { path: 'readiness', name: 'Readiness', component: () => import('@/views/Readiness.vue') },
       { path: 'inbounds', name: 'Inbounds', component: () => import('@/views/Inbounds.vue') },
       { path: 'outbounds', name: 'Outbounds', component: () => import('@/views/Outbounds.vue') },
       { path: 'users', name: 'Users', component: () => import('@/views/Users.vue') },

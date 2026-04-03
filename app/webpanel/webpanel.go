@@ -190,6 +190,7 @@ func (wp *WebPanel) registerRoutes(mux *http.ServeMux) {
 	// Stats
 	mux.HandleFunc("/api/v1/sys/stats", wp.authMiddleware(wp.handleSysStats))
 	mux.HandleFunc("/api/v1/sys/update", wp.authMiddleware(wp.handleUpdateStatus))
+	mux.HandleFunc("/api/v1/readiness", wp.authMiddleware(wp.handleReadiness))
 	mux.HandleFunc("/api/v1/stats/query", wp.authMiddleware(wp.handleQueryStats))
 	mux.HandleFunc("/api/v1/stats/online-users", wp.authMiddleware(wp.handleOnlineUsers))
 	mux.HandleFunc("/api/v1/stats/online-ips", wp.authMiddleware(wp.handleOnlineIPs))

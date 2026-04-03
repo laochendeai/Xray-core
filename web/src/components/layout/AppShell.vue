@@ -78,6 +78,7 @@ const currentRoute = computed(() => {
 
 const menuOptions = computed<MenuOption[]>(() => [
   { label: t('nav.dashboard'), key: 'dashboard' },
+  { label: t('nav.readiness'), key: 'readiness' },
   { label: t('nav.inbounds'), key: 'inbounds' },
   { label: t('nav.outbounds'), key: 'outbounds' },
   { label: t('nav.users'), key: 'users' },

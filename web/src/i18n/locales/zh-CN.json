@@ -38,6 +38,7 @@
   },
   "nav": {
     "dashboard": "仪表盘",
+    "readiness": "就绪中心",
     "inbounds": "入站管理",
     "outbounds": "出站管理",
     "users": "用户管理",
@@ -51,6 +52,8 @@
   },
   "dashboard": {
     "systemInfo": "系统信息",
+    "readinessTitle": "就绪概览",
+    "openReadiness": "打开就绪中心",
     "uptime": "运行时间",
     "version": "版本",
     "currentVersion": "当前版本",
@@ -78,6 +81,118 @@
     "activeOutbounds": "活跃出站",
     "realtimeTraffic": "实时流量",
     "topUsers": "流量排行"
+  },
+  "readiness": {
+    "title": "就绪中心",
+    "subtitle": "把配置、订阅、探测、节点池、TUN 与更新状态集中展示，优先告诉你哪里会真正影响系统可用性。",
+    "summaryTitle": "总体状态",
+    "goToArea": "前往处理",
+    "lastUpdated": "最近刷新",
+    "noChecks": "暂无检查项",
+    "severity": {
+      "ok": "正常",
+      "warning": "注意",
+      "blocking": "阻塞"
+    },
+    "area": {
+      "config": "配置",
+      "subscriptions": "订阅",
+      "node_pool": "节点池",
+      "tun": "透明模式",
+      "runtime": "运行态",
+      "updates": "更新"
+    },
+    "cards": {
+      "blocking": "阻塞项",
+      "warning": "告警项",
+      "checks": "检查项"
+    },
+    "overview": {
+      "healthyBadge": "已就绪",
+      "healthyTitle": "没有发现阻塞项",
+      "healthyBody": "当前关键路径都已经具备。即使仍有少量提醒项，也不会阻断主流程。",
+      "warningBadge": "有提醒",
+      "warningTitle": "存在需要关注的提醒",
+      "warningBody": "发现 {count} 个提醒项，建议尽快处理，避免后续演变成故障。",
+      "blockingBadge": "有阻塞",
+      "blockingTitle": "存在阻塞问题",
+      "blockingBody": "发现 {count} 个阻塞项，至少有一条关键路径目前不可用。",
+      "unavailableBadge": "未加载",
+      "unavailableTitle": "就绪数据暂未加载",
+      "unavailableBody": "无法获取聚合状态，请先刷新页面或检查后端接口。"
+    },
+    "checks": {
+      "unknown": {
+        "summary": "存在未识别的检查项。"
+      },
+      "configPath": {
+        "title": "配置文件路径",
+        "missing": "未配置 webpanel.configPath，订阅、节点池和透明模式相关功能无法完整初始化。",
+        "notFound": "找不到配置文件：{path}",
+        "invalid": "配置文件无法读取或不是有效 JSON：{path}",
+        "ok": "已检测到配置文件：{path}",
+        "pathDetail": "配置路径：{path}",
+        "errorDetail": "错误详情：{error}"
+      },
+      "configSections": {
+        "title": "面板依赖配置段",
+        "ok": "api、stats、policy 等关键配置段已满足面板要求。",
+        "unavailable": "由于配置文件本身不可用，无法继续检查关键配置段。",
+        "missingSectionsSummary": "配置文件缺少面板依赖的核心段，部分功能将无法工作。",
+        "partialSummary": "配置文件主体存在，但仍缺少部分统计或服务配置。",
+        "missingSections": "缺少配置段：{items}",
+        "missingStatsFlags": "缺少统计开关：{items}",
+        "missingServices": "api.services 缺少服务：{items}"
+      },
+      "subscriptions": {
+        "title": "订阅与节点导入",
+        "unavailable": "订阅管理器未初始化，无法导入或维护节点池。",
+        "empty": "还没有任何订阅来源，节点池目前不会自动补充节点。",
+        "noNodes": "已经配置了 {subscriptions} 个订阅来源，但还没有导入到任何节点。",
+        "ok": "已加载 {subscriptions} 个订阅来源，共 {nodes} 个节点。",
+        "poolDetail": "节点分布：活跃 {active}，验证中 {staging}，候选 {candidate}，隔离 {quarantine}，已移除 {removed}。"
+      },
+      "probing": {
+        "title": "节点探测器",
+        "unavailable": "探测器依赖未就绪，当前无法判断节点真实成功率与平均延迟。",
+        "notStarted": "订阅管理器尚未进入探测循环。",
+        "dispatcherUnavailable": "Xray 路由分发器不可用，节点探测已被禁用。",
+        "idle": "探测器已配置，但当前没有可探测的节点标签。",
+        "stopped": "探测器配置存在，但当前没有运行。",
+        "running": "探测器正在运行，当前会按 {intervalSec} 秒周期检测 {tagCount} 个节点标签。",
+        "configDetail": "探测地址：{probeUrl}；探测间隔：{intervalSec} 秒；当前标签数：{tagCount}。"
+      },
+      "nodePool": {
+        "title": "节点池健康",
+        "unavailable": "节点池当前不可用。",
+        "empty": "节点池中还没有任何节点。",
+        "belowMinimum": "活跃池只有 {active} 个节点，低于最小要求 {minimum}。",
+        "ok": "活跃池共有 {active} 个节点，已达到最小要求 {minimum}。",
+        "distributionDetail": "池内分布：活跃 {active}，候选 {candidate}，验证中 {staging}，隔离 {quarantine}，已移除 {removed}。"
+      },
+      "tun": {
+        "title": "透明模式 / TUN",
+        "unavailable": "透明模式管理器未初始化。",
+        "degraded": "透明模式当前处于异常或降级状态，建议先排障再继续启用。",
+        "warning": "透明模式可见告警，启用前建议先修复提权或 helper 问题。",
+        "running": "透明模式当前已启用。",
+        "stopped": "透明模式当前未启用。",
+        "messageDetail": "状态消息：{message}",
+        "helperMissingDetail": "未检测到 helper 脚本，透明模式切换将无法执行。",
+        "privilegeRecommendedDetail": "建议重新安装或修复提权组件。",
+        "machineStateDetail": "机器状态：{state}"
+      },
+      "updates": {
+        "title": "版本更新检查",
+        "unavailable": "更新检查器当前不可用。",
+        "error": "最近一次更新检查失败。",
+        "stale": "当前展示的是缓存的更新信息，最新检查未成功。",
+        "updateAvailable": "当前版本 {currentVersion}，发现新版本 {latestVersion}。",
+        "ok": "当前版本 {currentVersion} 已是已知最新状态。",
+        "sourceDetail": "检查来源：{source}",
+        "messageDetail": "附加消息：{message}"
+      }
+    }
   },
   "inbounds": {
     "title": "入站管理",

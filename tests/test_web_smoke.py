@@ -204,6 +204,13 @@ class WebSmokeTest(unittest.TestCase):
         self.assertIn("/assets/index-", html)
 
     def test_login_and_authenticated_api_flow(self) -> None:
+        readiness = self.api_get("/api/v1/readiness")
+        self.assertIn("healthy", readiness)
+        self.assertIn("blockingCount", readiness)
+        self.assertIn("warningCount", readiness)
+        self.assertIn("checks", readiness)
+        self.assertIsInstance(readiness["checks"], list)
+
         subscriptions = self.api_get("/api/v1/subscriptions")
         self.assertIn("subscriptions", subscriptions)
         self.assertIsInstance(subscriptions["subscriptions"], list)

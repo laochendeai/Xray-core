@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type {
   NodePoolDashboardResponse,
+  ReadinessResponse,
   SubscriptionCreateRequest,
   SubscriptionUpdateRequest,
   TunEditableSettings,
@@ -49,6 +50,10 @@ export const statsAPI = {
   getOnlineUsers: () => apiClient.get('/stats/online-users') as Promise<any>,
   getOnlineIPs: (email: string) =>
     apiClient.get('/stats/online-ips', { params: { email } }) as Promise<any>
+}
+
+export const readinessAPI = {
+  get: () => apiClient.get('/readiness') as Promise<ReadinessResponse>
 }
 
 export const handlerAPI = {
