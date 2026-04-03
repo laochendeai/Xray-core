@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 
@@ -38,6 +41,36 @@ def http_json(method: str, url: str, payload: dict | None = None, token: str | N
     with urllib.request.urlopen(request, timeout=5) as response:
         body = response.read().decode("utf-8")
         return json.loads(body)
+
+
+@contextlib.contextmanager
+def serve_subscription_content(body: str):
+    state = {"body": body}
+
+    class SubscriptionHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # pragma: no cover - exercised via smoke test
+            payload = state["body"].encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format: str, *args) -> None:  # pragma: no cover - keep CI logs quiet
+            return
+
+    server = HTTPServer(("127.0.0.1", reserve_port()), SubscriptionHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        def update_body(value: str) -> None:
+            state["body"] = value
+
+        yield f"http://127.0.0.1:{server.server_port}/subscription", update_body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 class WebSmokeTest(unittest.TestCase):
@@ -143,6 +176,26 @@ class WebSmokeTest(unittest.TestCase):
             body = exc.read().decode("utf-8", errors="replace")
             self.fail(f"{path} returned {exc.code}: {body}\n{self.read_log_tail()}")
 
+    def api_json(self, method: str, path: str, payload: dict | None = None) -> dict:
+        try:
+            return http_json(method, f"{self.base_url}{path}", payload=payload, token=self.token)
+        except urllib.error.HTTPError as exc:  # pragma: no cover - easier diagnostics
+            body = exc.read().decode("utf-8", errors="replace")
+            self.fail(f"{method} {path} returned {exc.code}: {body}\n{self.read_log_tail()}")
+
+    def wait_for_api(self, path: str, predicate, timeout: float = 10.0) -> dict:
+        deadline = time.time() + timeout
+        last_response = None
+
+        while time.time() < deadline:
+            response = self.api_get(path)
+            last_response = response
+            if predicate(response):
+                return response
+            time.sleep(0.25)
+
+        self.fail(f"condition not met for {path}: {last_response}\n{self.read_log_tail()}")
+
     def test_root_serves_app_shell(self) -> None:
         request = urllib.request.Request(self.base_url, method="GET")
         with urllib.request.urlopen(request, timeout=5) as response:
@@ -165,6 +218,114 @@ class WebSmokeTest(unittest.TestCase):
         self.assertIn("routeMode", tun_settings)
         self.assertIn("remoteDns", tun_settings)
         self.assertIsInstance(tun_settings["remoteDns"], list)
+
+    def test_add_subscription_refresh_and_remove_node_observe_api_state_change(self) -> None:
+        initial_link = (
+            "vless://11111111-1111-1111-1111-111111111111@smoke-a.example.com:443"
+            "?encryption=none&security=tls&sni=smoke-a.example.com&type=tcp#smoke-a"
+        )
+        refreshed_link = (
+            "vless://22222222-2222-2222-2222-222222222222@smoke-b.example.com:443"
+            "?encryption=none&security=tls&sni=smoke-b.example.com&type=tcp#smoke-b"
+        )
+        subscription_id = None
+        node_id = None
+
+        with serve_subscription_content(f"{initial_link}\n") as (subscription_url, set_subscription_body):
+            try:
+                created = self.api_json(
+                    "POST",
+                    "/api/v1/subscriptions",
+                    {
+                        "url": subscription_url,
+                        "sourceType": "url",
+                        "remark": "smoke-subscription",
+                        "autoRefresh": False,
+                        "refreshIntervalMin": 60,
+                    },
+                )
+                subscription = created["subscription"]
+                subscription_id = subscription["id"]
+                self.assertEqual(subscription["sourceType"], "url")
+                self.assertEqual(subscription["nodeCount"], 1)
+
+                initial_pool = self.wait_for_api(
+                    "/api/v1/node-pool",
+                    lambda data: any(item["subscriptionId"] == subscription_id for item in data["nodes"]),
+                )
+                node = next(
+                    (item for item in initial_pool["nodes"] if item["subscriptionId"] == subscription_id),
+                    None,
+                )
+                self.assertIsNotNone(node, "new subscription node was not visible in node pool")
+
+                node_id = node["id"]
+                self.assertEqual(node["remark"], "smoke-a")
+                self.assertEqual(node["address"], "smoke-a.example.com")
+                self.assertEqual(node["status"], "staging")
+                self.assertEqual(node["statusReason"], "subscription_node_discovered")
+                self.assertEqual(initial_pool["summary"]["stagingCount"], 1)
+
+                set_subscription_body(f"{refreshed_link}\n")
+                refresh_result = self.api_json("POST", f"/api/v1/subscriptions/{subscription_id}/refresh")
+                self.assertEqual(refresh_result["message"], "Subscription refreshed successfully")
+
+                refreshed_pool = self.wait_for_api(
+                    "/api/v1/node-pool",
+                    lambda data: any(
+                        item["id"] == node_id
+                        and item["status"] == "candidate"
+                        and item["statusReason"] == "subscription_missing"
+                        for item in data["nodes"]
+                    )
+                    and any(item["address"] == "smoke-b.example.com" for item in data["nodes"]),
+                )
+                missing_node = next(item for item in refreshed_pool["nodes"] if item["id"] == node_id)
+                replacement_node = next(
+                    item for item in refreshed_pool["nodes"] if item["address"] == "smoke-b.example.com"
+                )
+                self.assertEqual(missing_node["status"], "candidate")
+                self.assertEqual(missing_node["statusReason"], "subscription_missing")
+                self.assertEqual(replacement_node["status"], "staging")
+                self.assertEqual(replacement_node["statusReason"], "subscription_node_discovered")
+                self.assertEqual(refreshed_pool["summary"]["candidateCount"], 1)
+                self.assertEqual(refreshed_pool["summary"]["stagingCount"], 1)
+
+                remove_result = self.api_json("POST", f"/api/v1/node-pool/{node_id}/remove")
+                self.assertEqual(remove_result["message"], "Node removed successfully")
+
+                removed_pool = self.wait_for_api(
+                    "/api/v1/node-pool",
+                    lambda data: any(
+                        item["id"] == node_id
+                        and item["status"] == "removed"
+                        and item["statusReason"] == "manual_remove"
+                        for item in data["nodes"]
+                    ),
+                )
+                removed_node = next(item for item in removed_pool["nodes"] if item["id"] == node_id)
+                self.assertEqual(removed_node["status"], "removed")
+                self.assertEqual(removed_node["statusReason"], "manual_remove")
+                self.assertEqual(removed_pool["summary"]["removedCount"], 1)
+                self.assertTrue(
+                    any(
+                        event["nodeId"] == node_id
+                        and event["reason"] == "manual_remove"
+                        and event["status"] == "removed"
+                        for event in removed_pool["recentEvents"]
+                    )
+                )
+            finally:
+                if subscription_id is not None:
+                    with contextlib.suppress(Exception):
+                        self.api_json("DELETE", f"/api/v1/subscriptions/{subscription_id}")
+                if node_id is not None:
+                    with contextlib.suppress(Exception):
+                        self.api_json(
+                            "POST",
+                            "/api/v1/node-pool/bulk-purge-removed",
+                            {"ids": [node_id]},
+                        )
 
 
 if __name__ == "__main__":
