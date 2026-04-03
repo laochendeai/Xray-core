@@ -234,6 +234,8 @@ type SubscriptionManager struct {
 	saveDelay           time.Duration
 	onPoolHealthChange  func(PoolHealthSummary)
 	bgWG                sync.WaitGroup
+	started             bool
+	dispatcherAvailable bool
 }
 
 const (
@@ -293,6 +295,8 @@ func (sm *SubscriptionManager) Start() error {
 			tags = append(tags, n.OutboundTag)
 		}
 	}
+	sm.started = true
+	sm.dispatcherAvailable = dispatcher != nil
 	sm.mu.Unlock()
 
 	if normalized {
@@ -337,6 +341,10 @@ func (sm *SubscriptionManager) Stop() {
 	default:
 		close(sm.stopCh)
 	}
+	sm.mu.Lock()
+	sm.started = false
+	sm.dispatcherAvailable = false
+	sm.mu.Unlock()
 	if sm.prober != nil {
 		sm.prober.Stop()
 	}
@@ -598,6 +606,39 @@ func (sm *SubscriptionManager) GetValidationConfig() ValidationConfig {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.state.ValidationConfig
+}
+
+type SubscriptionManagerReadinessSnapshot struct {
+	Started             bool               `json:"started"`
+	DispatcherAvailable bool               `json:"dispatcherAvailable"`
+	SubscriptionCount   int                `json:"subscriptionCount"`
+	NodeCount           int                `json:"nodeCount"`
+	ProbeURL            string             `json:"probeUrl"`
+	ProbeIntervalSec    int                `json:"probeIntervalSec"`
+	PoolSummary         NodePoolSummary    `json:"poolSummary"`
+	Prober              NodeProberSnapshot `json:"prober"`
+}
+
+func (sm *SubscriptionManager) ReadinessSnapshot() SubscriptionManagerReadinessSnapshot {
+	sm.mu.RLock()
+	cfg := sm.state.ValidationConfig
+	prober := sm.prober
+	snapshot := SubscriptionManagerReadinessSnapshot{
+		Started:             sm.started,
+		DispatcherAvailable: sm.dispatcherAvailable,
+		SubscriptionCount:   len(sm.state.Subscriptions),
+		NodeCount:           len(sm.state.Nodes),
+		ProbeURL:            cfg.ProbeURL,
+		ProbeIntervalSec:    cfg.ProbeIntervalSec,
+		PoolSummary:         sm.poolSummaryLocked(),
+	}
+	sm.mu.RUnlock()
+
+	if prober != nil {
+		snapshot.Prober = prober.Snapshot()
+	}
+
+	return snapshot
 }
 
 func (sm *SubscriptionManager) UpdateValidationConfig(cfg ValidationConfig) {

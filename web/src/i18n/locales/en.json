@@ -38,6 +38,7 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "readiness": "Readiness",
     "inbounds": "Inbounds",
     "outbounds": "Outbounds",
     "users": "Users",
@@ -51,6 +52,8 @@
   },
   "dashboard": {
     "systemInfo": "System Info",
+    "readinessTitle": "Readiness Overview",
+    "openReadiness": "Open Readiness",
     "uptime": "Uptime",
     "version": "Version",
     "currentVersion": "Current Version",
@@ -78,6 +81,118 @@
     "activeOutbounds": "Active Outbounds",
     "realtimeTraffic": "Realtime Traffic",
     "topUsers": "Top Users"
+  },
+  "readiness": {
+    "title": "Readiness Center",
+    "subtitle": "Aggregate config, subscriptions, probing, node pool, TUN, and update state in one place so the blocking issues are obvious first.",
+    "summaryTitle": "Overall State",
+    "goToArea": "Open Area",
+    "lastUpdated": "Last Refreshed",
+    "noChecks": "No checks available",
+    "severity": {
+      "ok": "OK",
+      "warning": "Warning",
+      "blocking": "Blocking"
+    },
+    "area": {
+      "config": "Config",
+      "subscriptions": "Subscriptions",
+      "node_pool": "Node Pool",
+      "tun": "Transparent Mode",
+      "runtime": "Runtime",
+      "updates": "Updates"
+    },
+    "cards": {
+      "blocking": "Blocking",
+      "warning": "Warnings",
+      "checks": "Checks"
+    },
+    "overview": {
+      "healthyBadge": "Ready",
+      "healthyTitle": "No blocking issues found",
+      "healthyBody": "The critical paths are available. Minor reminders may still exist, but they are not blocking the main workflow.",
+      "warningBadge": "Warnings",
+      "warningTitle": "Attention items found",
+      "warningBody": "{count} warning checks need attention before they grow into failures.",
+      "blockingBadge": "Blocked",
+      "blockingTitle": "Blocking issues found",
+      "blockingBody": "{count} blocking checks mean at least one critical path is unavailable right now.",
+      "unavailableBadge": "Not Loaded",
+      "unavailableTitle": "Readiness data is not loaded",
+      "unavailableBody": "The aggregate status could not be fetched yet. Refresh the page or verify the backend endpoint."
+    },
+    "checks": {
+      "unknown": {
+        "summary": "An unknown readiness check was returned."
+      },
+      "configPath": {
+        "title": "Config File Path",
+        "missing": "webpanel.configPath is not configured, so subscriptions, node-pool management, and transparent-mode diagnostics cannot initialize fully.",
+        "notFound": "The config file could not be found: {path}",
+        "invalid": "The config file cannot be read or is not valid JSON: {path}",
+        "ok": "The config file is available: {path}",
+        "pathDetail": "Config path: {path}",
+        "errorDetail": "Error detail: {error}"
+      },
+      "configSections": {
+        "title": "Required Panel Sections",
+        "ok": "The api, stats, and policy sections required by the panel are present.",
+        "unavailable": "The config file itself is unavailable, so the required sections cannot be checked further.",
+        "missingSectionsSummary": "The config is missing core sections required by the panel.",
+        "partialSummary": "The config exists, but some statistics or API service settings are still incomplete.",
+        "missingSections": "Missing sections: {items}",
+        "missingStatsFlags": "Missing stats flags: {items}",
+        "missingServices": "Missing api.services entries: {items}"
+      },
+      "subscriptions": {
+        "title": "Subscriptions and Imports",
+        "unavailable": "The subscription manager is not initialized, so node imports and pool maintenance are unavailable.",
+        "empty": "There are no subscription sources yet, so the pool cannot replenish nodes automatically.",
+        "noNodes": "{subscriptions} subscription source(s) are configured, but no nodes have been imported yet.",
+        "ok": "{subscriptions} subscription source(s) and {nodes} node(s) are loaded.",
+        "poolDetail": "Pool distribution: active {active}, staging {staging}, candidate {candidate}, quarantine {quarantine}, removed {removed}."
+      },
+      "probing": {
+        "title": "Node Prober",
+        "unavailable": "The prober dependencies are unavailable, so real fail-rate and latency signals cannot be collected.",
+        "notStarted": "The subscription manager has not entered its probing loop yet.",
+        "dispatcherUnavailable": "The Xray routing dispatcher is unavailable, so node probing is disabled.",
+        "idle": "The prober is configured, but there are no probeable node tags right now.",
+        "stopped": "The prober has configuration, but it is not currently running.",
+        "running": "The prober is running and checks {tagCount} node tag(s) every {intervalSec} seconds.",
+        "configDetail": "Probe URL: {probeUrl}; interval: {intervalSec}s; tracked tags: {tagCount}."
+      },
+      "nodePool": {
+        "title": "Node Pool Health",
+        "unavailable": "The node pool is currently unavailable.",
+        "empty": "The node pool does not contain any nodes yet.",
+        "belowMinimum": "The active pool has only {active} node(s), below the minimum of {minimum}.",
+        "ok": "The active pool has {active} node(s), meeting the minimum of {minimum}.",
+        "distributionDetail": "Pool distribution: active {active}, candidate {candidate}, staging {staging}, quarantine {quarantine}, removed {removed}."
+      },
+      "tun": {
+        "title": "Transparent Mode / TUN",
+        "unavailable": "The transparent-mode manager is not initialized.",
+        "degraded": "Transparent mode is degraded or in an error state. Fix it before enabling it again.",
+        "warning": "Transparent mode has warnings. Repair privilege or helper issues before enabling it.",
+        "running": "Transparent mode is enabled.",
+        "stopped": "Transparent mode is disabled.",
+        "messageDetail": "Status message: {message}",
+        "helperMissingDetail": "The helper script is missing, so transparent-mode switching cannot run.",
+        "privilegeRecommendedDetail": "Reinstalling or repairing the privilege helper is recommended.",
+        "machineStateDetail": "Machine state: {state}"
+      },
+      "updates": {
+        "title": "Release Check",
+        "unavailable": "The release checker is currently unavailable.",
+        "error": "The latest release check failed.",
+        "stale": "The page is showing cached release data because the latest refresh did not succeed.",
+        "updateAvailable": "Current version {currentVersion}; newer version {latestVersion} is available.",
+        "ok": "Current version {currentVersion} is up to date based on the latest known release state.",
+        "sourceDetail": "Release source: {source}",
+        "messageDetail": "Extra message: {message}"
+      }
+    }
   },
   "inbounds": {
     "title": "Inbound Management",

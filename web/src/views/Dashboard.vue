@@ -31,6 +31,43 @@
       </n-gi>
     </n-grid>
 
+    <n-card :title="t('dashboard.readinessTitle')" size="small">
+      <template #header-extra>
+        <n-space align="center" :size="12">
+          <n-tag :type="readinessOverview.type" size="small">
+            {{ readinessOverview.badgeLabel }}
+          </n-tag>
+          <n-button size="small" tertiary @click="router.push('/readiness')">
+            {{ t('dashboard.openReadiness') }}
+          </n-button>
+        </n-space>
+      </template>
+
+      <n-space vertical :size="12">
+        <n-alert :type="readinessOverview.type">
+          {{ readinessOverview.description }}
+        </n-alert>
+
+        <n-grid :cols="3" :x-gap="12" responsive="screen" item-responsive>
+          <n-gi span="3 m:1">
+            <n-statistic :label="t('readiness.cards.blocking')">
+              <template #default>{{ readiness?.blockingCount ?? '-' }}</template>
+            </n-statistic>
+          </n-gi>
+          <n-gi span="3 m:1">
+            <n-statistic :label="t('readiness.cards.warning')">
+              <template #default>{{ readiness?.warningCount ?? '-' }}</template>
+            </n-statistic>
+          </n-gi>
+          <n-gi span="3 m:1">
+            <n-statistic :label="t('readiness.cards.checks')">
+              <template #default>{{ readiness?.checks.length ?? '-' }}</template>
+            </n-statistic>
+          </n-gi>
+        </n-grid>
+      </n-space>
+    </n-card>
+
     <n-card :title="t('dashboard.updateStatusTitle')" size="small">
       <template #header-extra>
         <n-space align="center" :size="12">
@@ -108,6 +145,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NSpace,
   NGrid,
@@ -128,13 +166,15 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { useI18n } from 'vue-i18n'
-import { statsAPI } from '@/api/client'
-import type { UpdateStatusResponse } from '@/api/types'
+import { readinessAPI, statsAPI } from '@/api/client'
+import type { ReadinessResponse, UpdateStatusResponse } from '@/api/types'
 import { useStatsStore } from '@/stores/stats'
+import { describeReadinessOverview } from '@/utils/readiness'
 import { formatBytes, formatUptime } from '@/utils/format'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
 
+const router = useRouter()
 const { t } = useI18n()
 const statsStore = useStatsStore()
 
@@ -145,6 +185,7 @@ const totalDownlink = ref(0)
 const trafficHistory = ref<{ time: string; up: number; down: number }[]>([])
 const topUsers = ref<any[]>([])
 const updateStatus = ref<UpdateStatusResponse | null>(null)
+const readiness = ref<ReadinessResponse | null>(null)
 const loadingUpdate = ref(false)
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -194,6 +235,14 @@ async function fetchData() {
       .slice(0, 10)
   } catch {
     // Ignore polling errors
+  }
+}
+
+async function fetchReadiness() {
+  try {
+    readiness.value = await readinessAPI.get()
+  } catch {
+    readiness.value = null
   }
 }
 
@@ -260,6 +309,8 @@ const updateBadge = computed(() => {
   return { type: 'success' as const, label: t('dashboard.upToDate') }
 })
 
+const readinessOverview = computed(() => describeReadinessOverview(t, readiness.value))
+
 function formatDateTime(value?: string) {
   if (!value) return '-'
   const date = new Date(value)
@@ -269,6 +320,7 @@ function formatDateTime(value?: string) {
 
 onMounted(() => {
   fetchData()
+  fetchReadiness()
   fetchUpdateStatus()
   pollTimer = setInterval(fetchData, 5000)
 })
