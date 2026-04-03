@@ -1,10 +1,12 @@
+Closes #
+
 ## Summary
 
 Describe the change in one short paragraph.
 
 ## Linked Issue
 
-Link the issue this PR closes or addresses.
+Use a closing keyword above, for example `Closes #123`.
 
 ## Scope
 

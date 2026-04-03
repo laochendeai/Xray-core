@@ -179,7 +179,7 @@ This repository uses a hard-gated change workflow for local work and PRs.
 3. Make the change.
 4. Run `bash scripts/check.sh`.
 5. Push. The local pre-push hook in [`.githooks/pre-push`](.githooks/pre-push) runs the same check again.
-6. Open a PR with [`.github/pull_request_template.md`](.github/pull_request_template.md) and wait for [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to pass.
+6. Open a PR with [`.github/pull_request_template.md`](.github/pull_request_template.md), include `Closes #<issue-number>` in the PR body, and wait for [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to pass.
 
 `scripts/check.sh` is the single local entry point. It runs the WebPanel Go tests, the frontend production build, and the key-path regression smoke test in [`tests/test_web_smoke.py`](tests/test_web_smoke.py).
 
