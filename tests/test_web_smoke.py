@@ -435,8 +435,8 @@ class WebSmokeTest(unittest.TestCase):
                     "/api/v1/node-pool",
                     lambda data: any(
                         item["id"] == node_id
-                        and item["status"] == "candidate"
-                        and item["statusReason"] == "subscription_missing"
+                        and item["status"] == "staging"
+                        and item.get("subscriptionMissing") is True
                         for item in data["nodes"]
                     )
                     and any(item["address"] == "smoke-b.example.com" for item in data["nodes"]),
@@ -445,12 +445,13 @@ class WebSmokeTest(unittest.TestCase):
                 replacement_node = next(
                     item for item in refreshed_pool["nodes"] if item["address"] == "smoke-b.example.com"
                 )
-                self.assertEqual(missing_node["status"], "candidate")
-                self.assertEqual(missing_node["statusReason"], "subscription_missing")
+                self.assertEqual(missing_node["status"], "staging")
+                self.assertEqual(missing_node["statusReason"], "subscription_node_discovered")
+                self.assertTrue(missing_node["subscriptionMissing"])
                 self.assertEqual(replacement_node["status"], "staging")
                 self.assertEqual(replacement_node["statusReason"], "subscription_node_discovered")
-                self.assertEqual(refreshed_pool["summary"]["candidateCount"], 1)
-                self.assertEqual(refreshed_pool["summary"]["stagingCount"], 1)
+                self.assertEqual(refreshed_pool["summary"]["candidateCount"], 0)
+                self.assertEqual(refreshed_pool["summary"]["stagingCount"], 2)
 
                 remove_result = self.api_json("POST", f"/api/v1/node-pool/{node_id}/remove")
                 self.assertEqual(remove_result["message"], "Node removed successfully")
@@ -550,8 +551,8 @@ class WebSmokeTest(unittest.TestCase):
                         "/api/v1/node-pool",
                         lambda data: any(
                             item["id"] == original_node_id
-                            and item["status"] == "candidate"
-                            and item["statusReason"] == "subscription_missing"
+                            and item["status"] == "staging"
+                            and item.get("subscriptionMissing") is True
                             for item in data["nodes"]
                         )
                         and any(

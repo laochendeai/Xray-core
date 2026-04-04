@@ -231,8 +231,11 @@
               </n-tag>
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
-            <div class="node-card-meta">{{ reasonLabel(node.statusReason) }}</div>
+            <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <n-space :size="8" wrap>
+              <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
+                {{ t('nodePool.subscriptionMissingFlag') }}
+              </n-tag>
               <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
                 {{ cleanlinessLabel(node.cleanliness) }}
               </n-tag>
@@ -304,8 +307,11 @@
               </n-tag>
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
-            <div class="node-card-meta">{{ reasonLabel(node.statusReason) }}</div>
+            <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <n-space :size="8" wrap>
+              <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
+                {{ t('nodePool.subscriptionMissingFlag') }}
+              </n-tag>
               <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
                 {{ cleanlinessLabel(node.cleanliness) }}
               </n-tag>
@@ -383,8 +389,11 @@
               </n-tag>
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
-            <div class="node-card-meta">{{ reasonLabel(node.statusReason) }}</div>
+            <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <n-space :size="8" wrap>
+              <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
+                {{ t('nodePool.subscriptionMissingFlag') }}
+              </n-tag>
               <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
                 {{ cleanlinessLabel(node.cleanliness) }}
               </n-tag>
@@ -462,8 +471,11 @@
               </n-tag>
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
-            <div class="node-card-meta">{{ reasonLabel(node.statusReason) }}</div>
+            <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <n-space :size="8" wrap>
+              <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
+                {{ t('nodePool.subscriptionMissingFlag') }}
+              </n-tag>
               <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
                 {{ cleanlinessLabel(node.cleanliness) }}
               </n-tag>
@@ -551,8 +563,13 @@
               </n-tag>
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
-            <div class="node-card-meta">{{ reasonLabel(node.statusReason) }}</div>
+            <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <div class="node-card-meta">{{ t('nodePool.removedAt') }}: {{ formatDateTime(node.statusUpdatedAt || node.lastEventAt || node.addedAt) || '-' }}</div>
+            <n-space v-if="showSubscriptionMissingTag(node)" :size="8" wrap>
+              <n-tag size="small" type="warning">
+                {{ t('nodePool.subscriptionMissingFlag') }}
+              </n-tag>
+            </n-space>
             <n-space :size="8" class="node-card-actions">
               <n-button size="small" type="primary" @click="handleRestore(node.id)">
                 {{ t('nodePool.restoreNode') }}
@@ -951,6 +968,17 @@ function reasonLabel(reason: TransitionReason | MachineStateReason) {
   return translateCode('nodePool.reason', reason)
 }
 
+function showSubscriptionMissingTag(node: NodeRecord) {
+  return !!node.subscriptionMissing && node.statusReason !== 'subscription_missing'
+}
+
+function nodeReasonLabel(node: NodeRecord) {
+  if (node.subscriptionMissing && node.statusReason === 'subscription_missing') {
+    return reasonLabel('subscription_missing')
+  }
+  return reasonLabel(node.statusReason)
+}
+
 function cleanlinessLabel(cleanliness: CleanlinessStatus) {
   return translateCode('nodePool.cleanliness', cleanliness)
 }
@@ -1122,15 +1150,25 @@ function createColumns(group: 'candidate' | 'staging' | 'active' | 'quarantine' 
     {
       title: () => t('nodePool.address'),
       key: 'address',
-      width: 200,
-      render: (row) => `${row.address}:${row.port}`
+      width: 240,
+      render: (row) => {
+        if (!showSubscriptionMissingTag(row)) {
+          return `${row.address}:${row.port}`
+        }
+        return h(NSpace, { size: 6, align: 'center' }, {
+          default: () => [
+            h('span', `${row.address}:${row.port}`),
+            h(NTag, { size: 'small', type: 'warning' }, { default: () => t('nodePool.subscriptionMissingFlag') })
+          ]
+        })
+      }
     },
     {
       title: () => t('nodePool.reasonLabel'),
       key: 'statusReason',
       width: 200,
       ellipsis: { tooltip: true },
-      render: (row) => reasonLabel(row.statusReason)
+      render: (row) => nodeReasonLabel(row)
     },
     {
       title: () => t('nodePool.avgDelay'),

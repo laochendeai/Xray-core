@@ -524,7 +524,7 @@
       "avg_delay_desc": "Avg delay high to low"
     },
     "lifecycleGuide": {
-      "candidate": "Waiting to be re-registered, moved back manually from removed, or parked because it disappeared from the subscription; it only starts probing after you send it to validation.",
+      "candidate": "Waiting to be re-registered or moved back manually from removed; it only starts probing after you send it to validation.",
       "staging": "Already in the validation flow. The panel tests fail rate and average latency against the probe URL.",
       "active": "Passed validation and entered the active pool, so it can be used for transparent mode and node selection.",
       "quarantine": "Failed repeated probes or was moved out manually; it is kept out of the active pool for now.",
@@ -559,7 +559,7 @@
       "manual_restore": "Moved manually back to candidate",
       "manual_quarantine": "Moved out of the active pool manually",
       "manual_remove": "Removed manually",
-      "subscription_missing": "Missing from the upstream subscription and parked in candidate",
+      "subscription_missing": "Missing from the upstream subscription",
       "subscription_deleted": "Subscription deleted",
       "subscription_reintroduced": "Reintroduced by the subscription",
       "migration_legacy_demoted": "Migrated from legacy demoted state",
@@ -575,6 +575,7 @@
       "fallback_failed": "Automatic fallback failed",
       "state_load_defaulted": "Machine state file was reset to defaults"
     },
+    "subscriptionMissingFlag": "Subscription Missing",
     "banner": {
       "cleanTitle": "The machine is clean right now",
       "proxiedTitle": "Transparent mode is currently using the node pool",

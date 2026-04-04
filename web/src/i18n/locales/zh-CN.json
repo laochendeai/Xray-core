@@ -524,7 +524,7 @@
       "avg_delay_desc": "按平均延迟从高到低"
     },
     "lifecycleGuide": {
-      "candidate": "等待重新注册、手工从已移除移回，或因订阅中已消失而暂时停放；点击“加入验证池”后才开始探测。",
+      "candidate": "等待重新注册或手工从已移除移回；点击“加入验证池”后才开始探测。",
       "staging": "已进入验证流程，系统会按探测地址测试失败率和平均延迟。",
       "active": "探测达标，进入活跃池，可用于透明模式和节点选择。",
       "quarantine": "连续探测失败或被手动移出活跃池；暂不作为活跃节点使用。",
@@ -559,7 +559,7 @@
       "manual_restore": "手动恢复到候选池",
       "manual_quarantine": "手动移出活跃池",
       "manual_remove": "手动移除",
-      "subscription_missing": "订阅中已消失，已停到候选池",
+      "subscription_missing": "订阅中已消失",
       "subscription_deleted": "订阅已删除",
       "subscription_reintroduced": "订阅重新出现",
       "migration_legacy_demoted": "从旧 demoted 状态迁移",
@@ -575,6 +575,7 @@
       "fallback_failed": "自动回退失败",
       "state_load_defaulted": "机器状态文件损坏，已回退默认值"
     },
+    "subscriptionMissingFlag": "订阅已失联",
     "banner": {
       "cleanTitle": "机器当前是干净状态",
       "proxiedTitle": "透明模式正在使用节点池",

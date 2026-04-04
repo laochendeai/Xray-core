@@ -861,7 +861,7 @@ func TestSubscriptionManagerBulkPurgeRemovedDeletesOnlySelectedRemovedNodes(t *t
 	}
 }
 
-func TestSubscriptionManagerRefreshSubscriptionParksMissingNodesInCandidate(t *testing.T) {
+func TestSubscriptionManagerRefreshSubscriptionKeepsMissingNodesInPlace(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -944,14 +944,21 @@ func TestSubscriptionManagerRefreshSubscriptionParksMissingNodesInCandidate(t *t
 		tagByID[node.ID] = node.OutboundTag
 	}
 
-	if statusByID[missingID] != NodeStatusCandidate {
-		t.Fatalf("expected missing node to move to candidate, got %q", statusByID[missingID])
+	if statusByID[missingID] != NodeStatusStaging {
+		t.Fatalf("expected missing node to stay staging, got %q", statusByID[missingID])
 	}
-	if reasonByID[missingID] != TransitionReasonSubscriptionMissing {
-		t.Fatalf("expected missing node reason to become subscription_missing, got %q", reasonByID[missingID])
+	if reasonByID[missingID] != TransitionReasonSubscriptionNodeDiscovered {
+		t.Fatalf("expected missing node reason to stay subscription_node_discovered, got %q", reasonByID[missingID])
 	}
-	if tagByID[missingID] != "" {
-		t.Fatalf("expected missing node outbound tag to be cleared, got %q", tagByID[missingID])
+	if tagByID[missingID] == "" {
+		t.Fatalf("expected missing node outbound tag to stay registered")
+	}
+	nodeByID := make(map[string]NodeRecord, len(nodes))
+	for _, node := range nodes {
+		nodeByID[node.ID] = node
+	}
+	if !nodeByID[missingID].SubscriptionMissing {
+		t.Fatalf("expected missing node to be marked subscriptionMissing")
 	}
 	if statusByID[liveID] != NodeStatusStaging {
 		t.Fatalf("expected live node to be staged, got %q", statusByID[liveID])
@@ -962,7 +969,7 @@ func TestSubscriptionManagerRefreshSubscriptionParksMissingNodesInCandidate(t *t
 		t.Fatalf("expected 1 subscription, got %d", len(listed))
 	}
 	if listed[0].NodeCount != 1 {
-		t.Fatalf("expected subscription node count 1 after parking missing node, got %d", listed[0].NodeCount)
+		t.Fatalf("expected subscription node count 1 after marking missing node, got %d", listed[0].NodeCount)
 	}
 }
 
@@ -1014,6 +1021,7 @@ func TestSubscriptionManagerRefreshSubscriptionReintroducesCandidateMissingNode(
 	sm.mu.Lock()
 	sm.state.Nodes[0].Status = NodeStatusCandidate
 	sm.state.Nodes[0].StatusReason = TransitionReasonSubscriptionMissing
+	sm.state.Nodes[0].SubscriptionMissing = true
 	sm.state.Nodes[0].OutboundTag = ""
 	now := time.Now().Add(-time.Minute)
 	sm.state.Nodes[0].StatusUpdatedAt = timePtr(now)
@@ -1033,6 +1041,9 @@ func TestSubscriptionManagerRefreshSubscriptionReintroducesCandidateMissingNode(
 	}
 	if nodes[0].StatusReason != TransitionReasonSubscriptionReintroduced {
 		t.Fatalf("expected reintroduced node reason, got %q", nodes[0].StatusReason)
+	}
+	if nodes[0].SubscriptionMissing {
+		t.Fatalf("expected reintroduced node subscriptionMissing to be cleared")
 	}
 	if nodes[0].OutboundTag != probeOutboundTag(nodeID) {
 		t.Fatalf("expected reintroduced node outbound tag %q, got %q", probeOutboundTag(nodeID), nodes[0].OutboundTag)
@@ -1124,6 +1135,108 @@ func TestSubscriptionManagerUpdateSubscriptionMetadataKeepsNodeHistory(t *testin
 	}
 }
 
+func TestSubscriptionManagerRefreshSubscriptionKeepsActiveMissingNodeInPlace(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	handlerStub := &stubHandlerServiceClient{}
+	sm := NewSubscriptionManager(configPath, &GRPCClient{handlerClient: handlerStub}, nil, nil)
+	defer sm.Stop()
+
+	missingURI, err := GenerateShareLink(ShareLinkRequest{
+		Protocol: "vless",
+		Address:  "active-missing.example.com",
+		Port:     443,
+		UUID:     "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		Remark:   "active-missing",
+		TLS:      "tls",
+		SNI:      "active-missing.example.com",
+	})
+	if err != nil {
+		t.Fatalf("generate missing share link: %v", err)
+	}
+	liveURI, err := GenerateShareLink(ShareLinkRequest{
+		Protocol: "vless",
+		Address:  "active-live.example.com",
+		Port:     443,
+		UUID:     "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+		Remark:   "active-live",
+		TLS:      "tls",
+		SNI:      "active-live.example.com",
+	})
+	if err != nil {
+		t.Fatalf("generate live share link: %v", err)
+	}
+
+	subID := "sub-active-missing"
+	sm.mu.Lock()
+	sm.state.Subscriptions = []SubscriptionRecord{
+		{
+			ID:         subID,
+			SourceType: SubscriptionSourceManual,
+			Content:    missingURI + "\n" + liveURI,
+			Remark:     "manual sub",
+		},
+	}
+	sm.mu.Unlock()
+
+	if err := sm.RefreshSubscription(subID); err != nil {
+		t.Fatalf("initial refresh subscription: %v", err)
+	}
+
+	nodes := sm.ListNodes("")
+	missingID := ""
+	for _, node := range nodes {
+		if node.Address == "active-missing.example.com" {
+			missingID = node.ID
+			break
+		}
+	}
+	if missingID == "" {
+		t.Fatalf("expected missing node id after initial refresh")
+	}
+
+	sm.mu.Lock()
+	for i := range sm.state.Nodes {
+		if sm.state.Nodes[i].ID != missingID {
+			continue
+		}
+		sm.state.Nodes[i].Status = NodeStatusActive
+		sm.state.Nodes[i].StatusReason = TransitionReasonManualPromote
+		sm.state.Nodes[i].OutboundTag = probeOutboundTag(missingID)
+		break
+	}
+	sm.state.Subscriptions[0].Content = liveURI
+	sm.mu.Unlock()
+
+	if err := sm.RefreshSubscription(subID); err != nil {
+		t.Fatalf("second refresh subscription: %v", err)
+	}
+
+	nodes = sm.ListNodes("")
+	for _, node := range nodes {
+		if node.ID != missingID {
+			continue
+		}
+		if node.Status != NodeStatusActive {
+			t.Fatalf("expected missing active node to stay active, got %q", node.Status)
+		}
+		if node.StatusReason != TransitionReasonManualPromote {
+			t.Fatalf("expected missing active node reason to stay manual_promote, got %q", node.StatusReason)
+		}
+		if !node.SubscriptionMissing {
+			t.Fatalf("expected missing active node to be marked subscriptionMissing")
+		}
+		if node.OutboundTag != probeOutboundTag(missingID) {
+			t.Fatalf("expected missing active node outbound tag %q, got %q", probeOutboundTag(missingID), node.OutboundTag)
+		}
+		return
+	}
+
+	t.Fatalf("missing active node %q not found after refresh", missingID)
+}
+
 func TestSubscriptionManagerUpdateSubscriptionURLReconcilesNodesInPlace(t *testing.T) {
 	t.Parallel()
 
@@ -1194,14 +1307,19 @@ func TestSubscriptionManagerUpdateSubscriptionURLReconcilesNodesInPlace(t *testi
 		addressByID[node.ID] = node.Address
 	}
 
-	if statusByID[originalNodeID] != NodeStatusCandidate {
-		t.Fatalf("expected original node to move to candidate, got %q", statusByID[originalNodeID])
+	if statusByID[originalNodeID] != NodeStatusStaging {
+		t.Fatalf("expected original node to stay staging, got %q", statusByID[originalNodeID])
 	}
-	if reasonByID[originalNodeID] != TransitionReasonSubscriptionMissing {
-		t.Fatalf("expected original node reason subscription_missing, got %q", reasonByID[originalNodeID])
+	if reasonByID[originalNodeID] != TransitionReasonSubscriptionNodeDiscovered {
+		t.Fatalf("expected original node reason subscription_node_discovered, got %q", reasonByID[originalNodeID])
 	}
 	if subscriptionByID[originalNodeID] != sub.ID {
 		t.Fatalf("expected original node subscription ID %q, got %q", sub.ID, subscriptionByID[originalNodeID])
+	}
+	for _, node := range nodes {
+		if node.ID == originalNodeID && !node.SubscriptionMissing {
+			t.Fatalf("expected original node to be marked subscriptionMissing")
+		}
 	}
 
 	replacementCount := 0

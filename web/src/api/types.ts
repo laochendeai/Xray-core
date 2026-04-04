@@ -200,6 +200,7 @@ export interface NodeRecord {
   outboundTag: string
   status: NodeStatus
   statusReason: TransitionReason
+  subscriptionMissing?: boolean
   subscriptionId: string
   addedAt: string
   promotedAt?: string
