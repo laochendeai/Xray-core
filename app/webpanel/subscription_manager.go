@@ -183,27 +183,28 @@ type SubscriptionUpdateInput struct {
 
 // NodeRecord represents a node in the pool.
 type NodeRecord struct {
-	ID               string            `json:"id"`
-	URI              string            `json:"uri"`
-	Remark           string            `json:"remark"`
-	Protocol         string            `json:"protocol"`
-	Address          string            `json:"address"`
-	Port             int               `json:"port"`
-	OutboundTag      string            `json:"outboundTag"`
-	Status           NodeStatus        `json:"status"`
-	StatusReason     TransitionReason  `json:"statusReason"`
-	SubscriptionID   string            `json:"subscriptionId"`
-	AddedAt          time.Time         `json:"addedAt"`
-	PromotedAt       *time.Time        `json:"promotedAt,omitempty"`
-	StatusUpdatedAt  *time.Time        `json:"statusUpdatedAt,omitempty"`
-	LastEventAt      *time.Time        `json:"lastEventAt,omitempty"`
-	TotalPings       int               `json:"totalPings"`
-	FailedPings      int               `json:"failedPings"`
-	AvgDelayMs       int64             `json:"avgDelayMs"`
-	ConsecutiveFails int               `json:"consecutiveFails"`
-	LastCheckedAt    *time.Time        `json:"lastCheckedAt,omitempty"`
-	Cleanliness      CleanlinessStatus `json:"cleanliness"`
-	BandwidthTier    BandwidthTier     `json:"bandwidthTier"`
+	ID                  string            `json:"id"`
+	URI                 string            `json:"uri"`
+	Remark              string            `json:"remark"`
+	Protocol            string            `json:"protocol"`
+	Address             string            `json:"address"`
+	Port                int               `json:"port"`
+	OutboundTag         string            `json:"outboundTag"`
+	Status              NodeStatus        `json:"status"`
+	StatusReason        TransitionReason  `json:"statusReason"`
+	SubscriptionMissing bool              `json:"subscriptionMissing,omitempty"`
+	SubscriptionID      string            `json:"subscriptionId"`
+	AddedAt             time.Time         `json:"addedAt"`
+	PromotedAt          *time.Time        `json:"promotedAt,omitempty"`
+	StatusUpdatedAt     *time.Time        `json:"statusUpdatedAt,omitempty"`
+	LastEventAt         *time.Time        `json:"lastEventAt,omitempty"`
+	TotalPings          int               `json:"totalPings"`
+	FailedPings         int               `json:"failedPings"`
+	AvgDelayMs          int64             `json:"avgDelayMs"`
+	ConsecutiveFails    int               `json:"consecutiveFails"`
+	LastCheckedAt       *time.Time        `json:"lastCheckedAt,omitempty"`
+	Cleanliness         CleanlinessStatus `json:"cleanliness"`
+	BandwidthTier       BandwidthTier     `json:"bandwidthTier"`
 }
 
 // ValidationConfig holds the criteria for promoting/quarantining nodes.
@@ -528,6 +529,7 @@ func (sm *SubscriptionManager) DeleteSubscription(id string) error {
 		if sm.state.Nodes[i].Status == NodeStatusRemoved {
 			continue
 		}
+		sm.state.Nodes[i].SubscriptionMissing = false
 		if err := sm.applyTransitionLocked(i, NodeStatusRemoved, TransitionReasonSubscriptionDeleted, EventActorSystem, "subscription deleted"); err != nil {
 			return err
 		}
@@ -1022,6 +1024,7 @@ func (sm *SubscriptionManager) refreshSubscriptionLocked(id string) error {
 
 		if idx, exists := existingByID[nodeID]; exists {
 			node := &sm.state.Nodes[idx]
+			wasMarkedMissing := node.SubscriptionMissing || ((node.Status == NodeStatusCandidate || node.Status == NodeStatusRemoved) && node.StatusReason == TransitionReasonSubscriptionMissing)
 			node.URI = uri
 			node.Remark = link.Remark
 			node.Protocol = link.Protocol
@@ -1034,13 +1037,24 @@ func (sm *SubscriptionManager) refreshSubscriptionLocked(id string) error {
 				}
 			}
 			if node.Status == NodeStatusCandidate && node.StatusReason == TransitionReasonSubscriptionMissing {
+				node.SubscriptionMissing = false
 				if err := sm.applyTransitionLocked(idx, NodeStatusStaging, TransitionReasonSubscriptionReintroduced, EventActorSystem, "subscription reintroduced"); err != nil {
+					node.SubscriptionMissing = wasMarkedMissing
 					sm.applyTransitionLocked(idx, NodeStatusCandidate, TransitionReasonSubscriptionMissing, EventActorSystem, err.Error())
 				}
 			}
 			if node.Status == NodeStatusRemoved && node.StatusReason == TransitionReasonSubscriptionMissing {
+				node.SubscriptionMissing = false
 				if err := sm.applyTransitionLocked(idx, NodeStatusStaging, TransitionReasonSubscriptionReintroduced, EventActorSystem, "subscription reintroduced"); err != nil {
+					node.SubscriptionMissing = wasMarkedMissing
 					sm.applyTransitionLocked(idx, NodeStatusRemoved, TransitionReasonSubscriptionMissing, EventActorSystem, err.Error())
+				}
+			}
+			if wasMarkedMissing && node.SubscriptionMissing {
+				if node.StatusReason == TransitionReasonSubscriptionReintroduced {
+					node.SubscriptionMissing = false
+				} else if node.StatusReason != TransitionReasonSubscriptionMissing {
+					sm.setSubscriptionMissingLocked(idx, false, TransitionReasonSubscriptionReintroduced, EventActorSystem, "subscription reintroduced; kept in current pool")
 				}
 			}
 			continue
@@ -1075,15 +1089,10 @@ func (sm *SubscriptionManager) refreshSubscriptionLocked(id string) error {
 		if newNodeIDs[node.ID] {
 			continue
 		}
-		if node.Status == NodeStatusRemoved && node.StatusReason != TransitionReasonSubscriptionMissing {
+		if node.SubscriptionMissing {
 			continue
 		}
-		if node.Status == NodeStatusCandidate && node.StatusReason == TransitionReasonSubscriptionMissing {
-			continue
-		}
-		if err := sm.applyTransitionLocked(i, NodeStatusCandidate, TransitionReasonSubscriptionMissing, EventActorSystem, "node disappeared from upstream subscription; parked in candidate"); err != nil {
-			return err
-		}
+		sm.setSubscriptionMissingLocked(i, true, TransitionReasonSubscriptionMissing, EventActorSystem, "node disappeared from upstream subscription; kept in current pool")
 	}
 
 	for i := range sm.state.Subscriptions {
@@ -1260,7 +1269,7 @@ func (sm *SubscriptionManager) applyTransitionLocked(idx int, nextStatus NodeSta
 	case TransitionReasonProbeQualified, TransitionReasonProbeRequalified, TransitionReasonManualPromote:
 		errors.LogInfo(context.Background(), "node pool: activated node ", node.Remark, " (", node.ID, ")")
 	case TransitionReasonSubscriptionMissing:
-		errors.LogInfo(context.Background(), "node pool: parked missing subscription node in candidate ", node.Remark, " (", node.ID, ")")
+		errors.LogInfo(context.Background(), "node pool: marked missing subscription node ", node.Remark, " (", node.ID, ")")
 	case TransitionReasonManualRestore:
 		errors.LogInfo(context.Background(), "node pool: moved removed node back to candidate ", node.Remark, " (", node.ID, ")")
 	case TransitionReasonManualRemove, TransitionReasonSubscriptionDeleted:
@@ -1268,6 +1277,38 @@ func (sm *SubscriptionManager) applyTransitionLocked(idx int, nextStatus NodeSta
 	}
 
 	return nil
+}
+
+func (sm *SubscriptionManager) setSubscriptionMissingLocked(idx int, missing bool, reason TransitionReason, actor EventActor, details string) {
+	if idx < 0 || idx >= len(sm.state.Nodes) {
+		return
+	}
+
+	node := &sm.state.Nodes[idx]
+	if node.SubscriptionMissing == missing {
+		return
+	}
+
+	now := time.Now()
+	node.SubscriptionMissing = missing
+	node.LastEventAt = &now
+
+	sm.appendNodeEventLocked(NodeEvent{
+		NodeID:   node.ID,
+		Remark:   node.Remark,
+		Status:   node.Status,
+		Reason:   reason,
+		Actor:    actor,
+		At:       now,
+		Details:  details,
+		NodeAddr: fmt.Sprintf("%s:%d", node.Address, node.Port),
+	})
+
+	if missing {
+		errors.LogInfo(context.Background(), "node pool: marked missing subscription node and kept status ", node.Status, " for ", node.Remark, " (", node.ID, ")")
+		return
+	}
+	errors.LogInfo(context.Background(), "node pool: cleared missing-subscription marker for ", node.Remark, " (", node.ID, ")")
 }
 
 func (sm *SubscriptionManager) normalizeProbeStateLocked() bool {
@@ -1836,6 +1877,10 @@ func normalizeNodeRecord(node *NodeRecord, now time.Time) bool {
 		}
 		changed = true
 	}
+	if node.StatusReason == TransitionReasonSubscriptionMissing && !node.SubscriptionMissing {
+		node.SubscriptionMissing = true
+		changed = true
+	}
 	return changed
 }
 
@@ -1886,7 +1931,7 @@ func isAllowedNodeTransition(current, next NodeStatus) bool {
 }
 
 func isCountedSubscriptionNode(node NodeRecord) bool {
-	return node.Status != NodeStatusRemoved && node.StatusReason != TransitionReasonSubscriptionMissing
+	return node.Status != NodeStatusRemoved && !node.SubscriptionMissing && node.StatusReason != TransitionReasonSubscriptionMissing
 }
 
 func probeOutboundTag(nodeID string) string {
