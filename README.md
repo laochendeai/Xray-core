@@ -210,6 +210,47 @@ This repository uses a hard-gated change workflow for local work and PRs.
 
 Release packaging workflows in [`.github/workflows/release.yml`](.github/workflows/release.yml) and [`.github/workflows/release-win7.yml`](.github/workflows/release-win7.yml) are reserved for version tags, published releases, and manual dispatch, so normal PRs stay on the fast validation path.
 
+### Release Matrix
+
+The matrix below describes what the current release workflows produce. It reflects the workflow definitions in [`.github/workflows/release.yml`](.github/workflows/release.yml), [`.github/workflows/release-win7.yml`](.github/workflows/release-win7.yml), and [`.github/workflows/docker.yml`](.github/workflows/docker.yml). Existing zip examples are based on release `webpanel-v1.2.1`; the Windows installer entry reflects the workflow added on this branch.
+
+#### Binary Packages
+
+| Target | Architectures | Artifact Type | Workflow | Example Asset |
+| --- | --- | --- | --- | --- |
+| Android | `amd64`, `arm64` | `zip` with CLI binary, not an APK | `Build and Release` | `Xray-android-arm64-v8a.zip` |
+| macOS | `amd64`, `arm64` | `zip` with CLI binary | `Build and Release` | `Xray-macos-arm64-v8a.zip` |
+| Windows | `386`, `amd64`, `arm64` | `zip` with CLI binary; `amd64` also ships a direct `exe` installer | `Build and Release` | `Xray-windows-64.zip`, `Xray-windows-64-setup.exe` |
+| Windows 7 | `386`, `amd64` | `zip` with CLI binary | `Build and Release for Windows 7` | `Xray-win7-64.zip` |
+| Linux | `386`, `amd64`, `armv5`, `armv6`, `armv7`, `arm64`, `riscv64`, `loong64`, `mips`, `mipsle`, `mips64`, `mips64le`, `ppc64`, `ppc64le`, `s390x` | `zip` with CLI binary | `Build and Release` | `Xray-linux-64.zip` |
+| FreeBSD | `386`, `amd64`, `armv7`, `arm64` | `zip` with CLI binary | `Build and Release` | `Xray-freebsd-64.zip` |
+| OpenBSD | `386`, `amd64`, `armv7`, `arm64` | `zip` with CLI binary | `Build and Release` | `Xray-openbsd-64.zip` |
+
+Notes:
+- The Linux `mips` and `mipsle` packages also include soft-float binaries inside the same archive.
+- Release archives include checksum sidecars as `.dgst` files.
+- The Windows `exe` installer currently covers the modern `amd64` build only. Windows `386`, Windows `arm64`, and Windows 7 remain zip-only.
+
+#### Container Images
+
+| Target | Architectures | Artifact Type | Workflow |
+| --- | --- | --- | --- |
+| Docker / GHCR | `linux/amd64`, `linux/386`, `linux/arm/v6`, `linux/arm/v7`, `linux/arm64/v8`, `linux/ppc64le`, `linux/s390x`, `linux/riscv64`, `linux/loong64` | Multi-arch container image | `Build and Push Docker Image` |
+
+#### Not Covered Yet
+
+| Area | Current Status |
+| --- | --- |
+| Android app delivery | No APK is published. Current Android artifacts are raw binaries in zip archives. |
+| Apple mobile platforms | No iOS, iPadOS, tvOS, or watchOS release artifacts are produced here. |
+| Desktop installers beyond Windows amd64 | No `msi`, `dmg`, `pkg`, `AppImage`, `deb`, or `rpm` package is published. |
+| Windows installer coverage | Only the modern Windows `amd64` build gets a direct `.exe` installer. Windows `386`, Windows `arm64`, and Windows 7 remain zip-only. |
+| Code signing / notarization | No release workflow in this fork currently performs Windows signing or macOS notarization. |
+| Windows container images | Docker publishing currently targets Linux container architectures only. |
+| Extra Android 32-bit builds | No `armeabi-v7a` or `x86` Android release artifact is produced. |
+
+If you need a user-installable desktop or mobile client, treat these artifacts as core binaries rather than finished application packages.
+
 Fresh clones should install the shared hook path once:
 
 ```bash
