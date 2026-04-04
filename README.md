@@ -212,7 +212,7 @@ Release packaging workflows in [`.github/workflows/release.yml`](.github/workflo
 
 ### Release Matrix
 
-The matrix below describes what the current release workflows produce. It reflects the workflow definitions in [`.github/workflows/release.yml`](.github/workflows/release.yml), [`.github/workflows/release-win7.yml`](.github/workflows/release-win7.yml), and [`.github/workflows/docker.yml`](.github/workflows/docker.yml). Existing zip examples are based on release `webpanel-v1.2.1`; the Windows installer entry reflects the workflow added on this branch.
+The matrix below describes what the current release workflows produce. It reflects the workflow definitions in [`.github/workflows/release.yml`](.github/workflows/release.yml), [`.github/workflows/release-win7.yml`](.github/workflows/release-win7.yml), and [`.github/workflows/docker.yml`](.github/workflows/docker.yml). Existing zip examples are based on release `webpanel-v1.2.2`; the Windows installer entry reflects the workflow added on this branch.
 
 #### Binary Packages
 
