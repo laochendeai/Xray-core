@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func mustGenerateTunTestURI(t *testing.T, address string) string {
@@ -1513,5 +1514,241 @@ func TestTunManagerStartBlocksWhenPrivilegeArtifactsAreStale(t *testing.T) {
 	}
 	if status.Message != "Install or repair the privilege helper before enabling transparent TUN mode" {
 		t.Fatalf("unexpected message: %q", status.Message)
+	}
+}
+
+func TestTunManagerStatusReportsSeparatedLiveAndProxyEgressWhenTunStopped(t *testing.T) {
+	tunManager, paths := newStatusTestTunManager(t)
+
+	checkedAt := time.Date(2026, time.April, 8, 10, 0, 0, 0, time.UTC)
+	tunManager.directEgressProber = func(*TunFeatureSettings) tunPublicEgressProbeResult {
+		return tunPublicEgressProbeResult{
+			IP:        "118.249.206.100",
+			Endpoint:  "https://probe.example/direct",
+			CheckedAt: checkedAt,
+		}
+	}
+
+	status := tunManager.Status()
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+	if status.DirectEgress == nil {
+		t.Fatal("expected direct egress observation")
+	}
+	if status.DirectEgress.Status != "live" {
+		t.Fatalf("expected live direct egress, got %#v", status.DirectEgress)
+	}
+	if status.DirectEgress.IP != "118.249.206.100" {
+		t.Fatalf("unexpected direct egress IP: %#v", status.DirectEgress)
+	}
+	if status.ProxyEgress == nil || status.ProxyEgress.Status != "inactive" {
+		t.Fatalf("expected inactive proxy egress, got %#v", status.ProxyEgress)
+	}
+
+	cache := loadTunPublicEgressCache(&TunFeatureSettings{StateDir: paths.stateDir})
+	if cache.Direct == nil || cache.Direct.IP != "118.249.206.100" {
+		t.Fatalf("expected live direct egress to populate cache, got %#v", cache.Direct)
+	}
+
+	diagnostics := strings.Join(status.Diagnostics, "\n")
+	for _, token := range []string{
+		"Direct egress [live]",
+		"ip=118.249.206.100",
+		"Proxy egress [inactive]",
+	} {
+		if !strings.Contains(diagnostics, token) {
+			t.Fatalf("expected diagnostics to contain %q\n%s", token, diagnostics)
+		}
+	}
+}
+
+func TestTunManagerStatusReusesCachedDirectEgressWhenTunRunning(t *testing.T) {
+	tunManager, paths := newStatusTestTunManager(t)
+
+	if err := os.WriteFile(paths.helperStatePath, []byte("running\n"), 0o644); err != nil {
+		t.Fatalf("write helper state: %v", err)
+	}
+
+	checkedAt := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Second)
+	saveTunPublicEgressCache(&TunFeatureSettings{StateDir: paths.stateDir}, tunPublicEgressCache{
+		Direct: &tunPublicEgressCacheEntry{
+			IP:        "118.249.206.100",
+			CheckedAt: checkedAt,
+		},
+	})
+
+	probeCalls := 0
+	tunManager.directEgressProber = func(*TunFeatureSettings) tunPublicEgressProbeResult {
+		probeCalls++
+		return tunPublicEgressProbeResult{
+			IP:        "203.0.113.44",
+			CheckedAt: time.Now().UTC(),
+		}
+	}
+
+	status := tunManager.Status()
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+	if probeCalls != 0 {
+		t.Fatalf("expected cached direct egress path to skip live probe, got %d calls", probeCalls)
+	}
+	if status.Status != "running" {
+		t.Fatalf("expected running status, got %q", status.Status)
+	}
+	if status.DirectEgress == nil || status.DirectEgress.Status != "cached" {
+		t.Fatalf("expected cached direct egress, got %#v", status.DirectEgress)
+	}
+	if status.DirectEgress.IP != "118.249.206.100" {
+		t.Fatalf("unexpected cached direct egress: %#v", status.DirectEgress)
+	}
+	if status.DirectEgress.Stale {
+		t.Fatalf("did not expect cached direct egress to be stale: %#v", status.DirectEgress)
+	}
+	if status.ProxyEgress == nil || status.ProxyEgress.Status != "dynamic" {
+		t.Fatalf("expected dynamic proxy egress, got %#v", status.ProxyEgress)
+	}
+}
+
+func TestTunManagerStatusMarksStaleDirectEgressWhenTunRunningCacheExpired(t *testing.T) {
+	tunManager, paths := newStatusTestTunManager(t)
+
+	if err := os.WriteFile(paths.helperStatePath, []byte("running\n"), 0o644); err != nil {
+		t.Fatalf("write helper state: %v", err)
+	}
+
+	saveTunPublicEgressCache(&TunFeatureSettings{StateDir: paths.stateDir}, tunPublicEgressCache{
+		Direct: &tunPublicEgressCacheEntry{
+			IP:        "118.249.206.100",
+			CheckedAt: time.Now().UTC().Add(-(tunPublicEgressCacheTTL + time.Minute)).Truncate(time.Second),
+		},
+	})
+
+	status := tunManager.Status()
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+	if status.DirectEgress == nil || status.DirectEgress.Status != "stale" {
+		t.Fatalf("expected stale direct egress, got %#v", status.DirectEgress)
+	}
+	if !status.DirectEgress.Stale {
+		t.Fatalf("expected stale marker, got %#v", status.DirectEgress)
+	}
+}
+
+func TestTunManagerStatusBlocksDirectEgressWhenTunRunningWithoutIndependentCache(t *testing.T) {
+	tunManager, paths := newStatusTestTunManager(t)
+
+	if err := os.WriteFile(paths.helperStatePath, []byte("running\n"), 0o644); err != nil {
+		t.Fatalf("write helper state: %v", err)
+	}
+
+	probeCalls := 0
+	tunManager.directEgressProber = func(*TunFeatureSettings) tunPublicEgressProbeResult {
+		probeCalls++
+		return tunPublicEgressProbeResult{
+			IP:        "203.0.113.44",
+			CheckedAt: time.Now().UTC(),
+		}
+	}
+
+	status := tunManager.Status()
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+	if probeCalls != 0 {
+		t.Fatalf("expected no live probe while TUN is running without UID bypass, got %d calls", probeCalls)
+	}
+	if status.DirectEgress == nil || status.DirectEgress.Status != "blocked" {
+		t.Fatalf("expected blocked direct egress, got %#v", status.DirectEgress)
+	}
+}
+
+func TestTunManagerStatusFallsBackToCachedDirectEgressAfterLiveProbeFailure(t *testing.T) {
+	tunManager, paths := newStatusTestTunManager(t)
+
+	saveTunPublicEgressCache(&TunFeatureSettings{StateDir: paths.stateDir}, tunPublicEgressCache{
+		Direct: &tunPublicEgressCacheEntry{
+			IP:        "118.249.206.100",
+			CheckedAt: time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Second),
+		},
+	})
+
+	tunManager.directEgressProber = func(*TunFeatureSettings) tunPublicEgressProbeResult {
+		return tunPublicEgressProbeResult{Error: "direct probe timeout"}
+	}
+
+	status := tunManager.Status()
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+	if status.DirectEgress == nil || status.DirectEgress.Status != "cached" {
+		t.Fatalf("expected cached direct egress fallback, got %#v", status.DirectEgress)
+	}
+	if status.DirectEgress.Error != "direct probe timeout" {
+		t.Fatalf("expected probe failure to be surfaced, got %#v", status.DirectEgress)
+	}
+}
+
+type tunStatusTestPaths struct {
+	stateDir        string
+	helperStatePath string
+}
+
+func newStatusTestTunManager(t *testing.T) (*TunManager, tunStatusTestPaths) {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	stateDir := filepath.Join(tempDir, "runtime", "tun")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("create state dir: %v", err)
+	}
+
+	helperPath := filepath.Join(tempDir, "webpanel-tun-helper.sh")
+	writeTestTunHelper(t, helperPath)
+
+	binaryPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test binary: %v", err)
+	}
+
+	configPath := filepath.Join(tempDir, "config.json")
+	config := map[string]any{
+		"outbounds": []map[string]any{
+			{
+				"tag":      "direct",
+				"protocol": "freedom",
+			},
+		},
+		"webpanel": map[string]any{
+			"tun": map[string]any{
+				"helperPath":        helperPath,
+				"binaryPath":        binaryPath,
+				"stateDir":          stateDir,
+				"runtimeConfigPath": filepath.Join(stateDir, "config.json"),
+				"interfaceName":     "xray0",
+				"remoteDns":         []string{"1.1.1.1"},
+				"useSudo":           false,
+			},
+		},
+	}
+
+	raw, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.WriteFile(configPath, raw, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tunManager, err := NewTunManager(configPath)
+	if err != nil {
+		t.Fatalf("new tun manager: %v", err)
+	}
+
+	return tunManager, tunStatusTestPaths{
+		stateDir:        stateDir,
+		helperStatePath: filepath.Join(stateDir, "helper.state"),
 	}
 }

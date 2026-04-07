@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	stdnet "net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
@@ -66,12 +67,17 @@ const (
 	tunDirectProbeConcurrency   = 12
 	tunDirectProbeCacheVersion  = 1
 	tunDirectProbeCacheFileName = "route-probe-cache.json"
+	tunPublicEgressProbeTimeout = 1800 * time.Millisecond
+	tunPublicEgressCacheTTL     = 6 * time.Hour
+	tunPublicEgressCacheVersion = 1
+	tunPublicEgressCacheFile    = "egress-probe-cache.json"
 )
 
 type TunManager struct {
-	configPath string
-	xrayBin    string
-	mu         sync.Mutex
+	configPath         string
+	xrayBin            string
+	mu                 sync.Mutex
+	directEgressProber func(*TunFeatureSettings) tunPublicEgressProbeResult
 }
 
 type TunFeatureSettings struct {
@@ -108,6 +114,23 @@ type tunDirectProbeCacheEntry struct {
 	CheckedAt time.Time `json:"checkedAt"`
 }
 
+type tunPublicEgressCache struct {
+	Version int                        `json:"version"`
+	Direct  *tunPublicEgressCacheEntry `json:"direct,omitempty"`
+}
+
+type tunPublicEgressCacheEntry struct {
+	IP        string    `json:"ip"`
+	CheckedAt time.Time `json:"checkedAt"`
+}
+
+type tunPublicEgressProbeResult struct {
+	IP        string
+	Endpoint  string
+	CheckedAt time.Time
+	Error     string
+}
+
 type tunDirectProbeRequest struct {
 	Key   string
 	Host  string
@@ -121,32 +144,45 @@ type tunConfigEnvelope struct {
 }
 
 type TunStatus struct {
-	Status                      string             `json:"status"`
-	Running                     bool               `json:"running"`
-	Available                   bool               `json:"available"`
-	AllowRemote                 bool               `json:"allowRemote"`
-	UseSudo                     bool               `json:"useSudo"`
-	HelperExists                bool               `json:"helperExists"`
-	ElevationReady              bool               `json:"elevationReady"`
-	HelperCurrent               bool               `json:"helperCurrent"`
-	BinaryCurrent               bool               `json:"binaryCurrent"`
-	PrivilegeInstallRecommended bool               `json:"privilegeInstallRecommended"`
-	BinaryPath                  string             `json:"binaryPath"`
-	HelperPath                  string             `json:"helperPath"`
-	StateDir                    string             `json:"stateDir"`
-	RuntimeConfigPath           string             `json:"runtimeConfigPath"`
-	InterfaceName               string             `json:"interfaceName"`
-	MTU                         uint32             `json:"mtu"`
-	RemoteDNS                   []string           `json:"remoteDns"`
-	ConfigPath                  string             `json:"configPath"`
-	XrayBinary                  string             `json:"xrayBinary"`
-	Message                     string             `json:"message"`
-	LastOutput                  string             `json:"lastOutput,omitempty"`
-	Diagnostics                 []string           `json:"diagnostics,omitempty"`
-	MachineState                MachineState       `json:"machineState,omitempty"`
-	LastStateReason             MachineStateReason `json:"lastStateReason,omitempty"`
-	LastStateChangedAt          *time.Time         `json:"lastStateChangedAt,omitempty"`
-	RecentMachineEvents         []MachineEvent     `json:"recentMachineEvents,omitempty"`
+	Status                      string                `json:"status"`
+	Running                     bool                  `json:"running"`
+	Available                   bool                  `json:"available"`
+	AllowRemote                 bool                  `json:"allowRemote"`
+	UseSudo                     bool                  `json:"useSudo"`
+	HelperExists                bool                  `json:"helperExists"`
+	ElevationReady              bool                  `json:"elevationReady"`
+	HelperCurrent               bool                  `json:"helperCurrent"`
+	BinaryCurrent               bool                  `json:"binaryCurrent"`
+	PrivilegeInstallRecommended bool                  `json:"privilegeInstallRecommended"`
+	BinaryPath                  string                `json:"binaryPath"`
+	HelperPath                  string                `json:"helperPath"`
+	StateDir                    string                `json:"stateDir"`
+	RuntimeConfigPath           string                `json:"runtimeConfigPath"`
+	InterfaceName               string                `json:"interfaceName"`
+	MTU                         uint32                `json:"mtu"`
+	RemoteDNS                   []string              `json:"remoteDns"`
+	ConfigPath                  string                `json:"configPath"`
+	XrayBinary                  string                `json:"xrayBinary"`
+	Message                     string                `json:"message"`
+	LastOutput                  string                `json:"lastOutput,omitempty"`
+	Diagnostics                 []string              `json:"diagnostics,omitempty"`
+	DirectEgress                *TunEgressObservation `json:"directEgress,omitempty"`
+	ProxyEgress                 *TunEgressObservation `json:"proxyEgress,omitempty"`
+	MachineState                MachineState          `json:"machineState,omitempty"`
+	LastStateReason             MachineStateReason    `json:"lastStateReason,omitempty"`
+	LastStateChangedAt          *time.Time            `json:"lastStateChangedAt,omitempty"`
+	RecentMachineEvents         []MachineEvent        `json:"recentMachineEvents,omitempty"`
+}
+
+type TunEgressObservation struct {
+	Status    string     `json:"status"`
+	Route     string     `json:"route"`
+	IP        string     `json:"ip,omitempty"`
+	CheckedAt *time.Time `json:"checkedAt,omitempty"`
+	Source    string     `json:"source,omitempty"`
+	Stale     bool       `json:"stale,omitempty"`
+	Note      string     `json:"note,omitempty"`
+	Error     string     `json:"error,omitempty"`
 }
 
 func NewTunManager(configPath string) (*TunManager, error) {
@@ -156,8 +192,9 @@ func NewTunManager(configPath string) (*TunManager, error) {
 	}
 
 	return &TunManager{
-		configPath: configPath,
-		xrayBin:    xrayBin,
+		configPath:         configPath,
+		xrayBin:            xrayBin,
+		directEgressProber: defaultTunDirectEgressProber,
 	}, nil
 }
 
@@ -743,6 +780,8 @@ func (m *TunManager) inspectLocked(settings *TunFeatureSettings) *TunStatus {
 		ConfigPath:        m.configPath,
 		XrayBinary:        settings.BinaryPath,
 	}
+	defer m.populateEgressObservationsLocked(settings, status)
+
 	if normalizeTunRouteMode(settings.RouteMode) == TunRouteModeAutoTested {
 		status.Diagnostics = append(status.Diagnostics, "Auto-tested split routing will probe base direct rules before enabling transparent mode; the first start or stale cache refresh can take longer.")
 	}
@@ -810,6 +849,256 @@ func (m *TunManager) inspectLocked(settings *TunFeatureSettings) *TunStatus {
 
 	status.Message = "Transparent TUN mode is disabled"
 	return status
+}
+
+func (m *TunManager) populateEgressObservationsLocked(settings *TunFeatureSettings, status *TunStatus) {
+	if settings == nil || status == nil {
+		return
+	}
+
+	status.DirectEgress = m.directEgressObservationLocked(settings, status.Running)
+	status.ProxyEgress = buildTunProxyEgressObservation(status.Running)
+	appendUniqueTunDiagnostic(status, formatTunEgressDiagnostic("Direct", status.DirectEgress))
+	appendUniqueTunDiagnostic(status, formatTunEgressDiagnostic("Proxy", status.ProxyEgress))
+}
+
+func (m *TunManager) directEgressObservationLocked(settings *TunFeatureSettings, tunRunning bool) *TunEgressObservation {
+	cache := loadTunPublicEgressCache(settings)
+
+	if tunRunning {
+		if tunDirectEgressProbeAllowedWhileRunning() {
+			live := m.runDirectEgressProbeLocked(settings)
+			if live.Error == "" {
+				saveTunPublicEgressCache(settings, tunPublicEgressCache{
+					Version: tunPublicEgressCacheVersion,
+					Direct: &tunPublicEgressCacheEntry{
+						IP:        live.IP,
+						CheckedAt: live.CheckedAt,
+					},
+				})
+				return buildTunLiveDirectEgressObservation(
+					live,
+					"Transparent TUN is active, but the current process is UID-bypassed, so this direct probe stayed off the proxy path.",
+				)
+			}
+			if cached := cachedTunDirectEgressObservation(cache.Direct, "The live direct probe failed while transparent TUN was active, so the last successful independent direct probe was reused.", live.Error); cached != nil {
+				return cached
+			}
+			return &TunEgressObservation{
+				Status: "error",
+				Route:  "system-direct",
+				Source: "system-http-probe",
+				Error:  live.Error,
+				Note:   "Transparent TUN is active and the direct probe failed even though the current process is UID-bypassed.",
+			}
+		}
+
+		if cache.Direct != nil && cache.Direct.IP != "" && !cache.Direct.CheckedAt.IsZero() {
+			checkedAt := cache.Direct.CheckedAt
+			observation := &TunEgressObservation{
+				Status:    "cached",
+				Route:     "system-direct",
+				IP:        cache.Direct.IP,
+				CheckedAt: &checkedAt,
+				Source:    "cache",
+				Note:      "Transparent TUN is active, so the panel reused the last independent direct probe instead of probing through the proxy path.",
+			}
+			if time.Since(cache.Direct.CheckedAt) > tunPublicEgressCacheTTL {
+				observation.Status = "stale"
+				observation.Stale = true
+				observation.Note = "Transparent TUN is active, and the last independent direct probe is stale because the panel process is not UID-bypassed."
+			}
+			return observation
+		}
+
+		return &TunEgressObservation{
+			Status: "blocked",
+			Route:  "system-direct",
+			Source: "independent-direct-probe-required",
+			Note:   "Transparent TUN is active and the panel process is not UID-bypassed, so no independent direct egress probe is available yet.",
+		}
+	}
+
+	live := m.runDirectEgressProbeLocked(settings)
+	if live.Error == "" {
+		saveTunPublicEgressCache(settings, tunPublicEgressCache{
+			Version: tunPublicEgressCacheVersion,
+			Direct: &tunPublicEgressCacheEntry{
+				IP:        live.IP,
+				CheckedAt: live.CheckedAt,
+			},
+		})
+		return buildTunLiveDirectEgressObservation(live, "Measured with transparent TUN disabled.")
+	}
+
+	if cached := cachedTunDirectEgressObservation(cache.Direct, "The live direct probe failed while transparent TUN was disabled, so the last successful independent direct probe was reused.", live.Error); cached != nil {
+		return cached
+	}
+
+	return &TunEgressObservation{
+		Status: "error",
+		Route:  "system-direct",
+		Source: "system-http-probe",
+		Error:  live.Error,
+		Note:   "Transparent TUN is disabled, but the independent direct egress probe failed and no cached value was available.",
+	}
+}
+
+func buildTunLiveDirectEgressObservation(result tunPublicEgressProbeResult, note string) *TunEgressObservation {
+	checkedAt := result.CheckedAt
+	return &TunEgressObservation{
+		Status:    "live",
+		Route:     "system-direct",
+		IP:        result.IP,
+		CheckedAt: &checkedAt,
+		Source:    coalesceTunEgressSource(result.Endpoint, "system-http-probe"),
+		Note:      note,
+	}
+}
+
+func cachedTunDirectEgressObservation(entry *tunPublicEgressCacheEntry, note string, probeError string) *TunEgressObservation {
+	if entry == nil || entry.IP == "" || entry.CheckedAt.IsZero() {
+		return nil
+	}
+
+	checkedAt := entry.CheckedAt
+	observation := &TunEgressObservation{
+		Status:    "cached",
+		Route:     "system-direct",
+		IP:        entry.IP,
+		CheckedAt: &checkedAt,
+		Source:    "cache",
+		Note:      note,
+		Error:     probeError,
+	}
+	if time.Since(entry.CheckedAt) > tunPublicEgressCacheTTL {
+		observation.Status = "stale"
+		observation.Stale = true
+	}
+	return observation
+}
+
+func buildTunProxyEgressObservation(tunRunning bool) *TunEgressObservation {
+	observation := &TunEgressObservation{
+		Route:  "proxy(node-pool-active)",
+		Source: "node-pool-active-balancer",
+	}
+	if tunRunning {
+		observation.Status = "dynamic"
+		observation.Note = "Proxy-eligible traffic currently uses the active node-pool balancer and is reported separately from the machine's direct egress."
+		return observation
+	}
+
+	observation.Status = "inactive"
+	observation.Note = "Transparent TUN is disabled, so proxy egress is inactive."
+	return observation
+}
+
+func formatTunEgressDiagnostic(scope string, observation *TunEgressObservation) string {
+	if observation == nil {
+		return ""
+	}
+
+	parts := []string{fmt.Sprintf("%s egress [%s]", scope, observation.Status)}
+	if observation.Route != "" {
+		parts = append(parts, "route="+observation.Route)
+	}
+	if observation.IP != "" {
+		parts = append(parts, "ip="+observation.IP)
+	}
+	if observation.CheckedAt != nil && !observation.CheckedAt.IsZero() {
+		parts = append(parts, "checkedAt="+observation.CheckedAt.UTC().Format(time.RFC3339))
+	}
+	if observation.Source != "" {
+		parts = append(parts, "source="+observation.Source)
+	}
+	if observation.Stale {
+		parts = append(parts, "stale=true")
+	}
+	if observation.Error != "" {
+		parts = append(parts, "error="+observation.Error)
+	}
+	if observation.Note != "" {
+		parts = append(parts, "note="+observation.Note)
+	}
+	return strings.Join(parts, " ")
+}
+
+func tunDirectEgressProbeAllowedWhileRunning() bool {
+	return os.Geteuid() == 0
+}
+
+func (m *TunManager) runDirectEgressProbeLocked(settings *TunFeatureSettings) tunPublicEgressProbeResult {
+	if m != nil && m.directEgressProber != nil {
+		return m.directEgressProber(settings)
+	}
+	return defaultTunDirectEgressProber(settings)
+}
+
+func defaultTunDirectEgressProber(_ *TunFeatureSettings) tunPublicEgressProbeResult {
+	client := &http.Client{Timeout: tunPublicEgressProbeTimeout}
+	endpoints := []string{
+		"https://api.ipify.org",
+		"https://ipv4.icanhazip.com",
+		"https://ifconfig.me/ip",
+	}
+
+	lastError := ""
+	for _, endpoint := range endpoints {
+		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		if err != nil {
+			lastError = err.Error()
+			continue
+		}
+		req.Header.Set("User-Agent", "xray-webpanel-tun-egress-probe/1")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastError = err.Error()
+			continue
+		}
+
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256))
+		resp.Body.Close()
+		if readErr != nil {
+			lastError = readErr.Error()
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastError = fmt.Sprintf("%s returned HTTP %d", endpoint, resp.StatusCode)
+			continue
+		}
+
+		candidate := strings.TrimSpace(string(body))
+		ip := stdnet.ParseIP(candidate)
+		if ip == nil {
+			lastError = fmt.Sprintf("%s returned a non-IP body", endpoint)
+			continue
+		}
+		if ip4 := ip.To4(); ip4 != nil {
+			candidate = ip4.String()
+		} else {
+			candidate = ip.String()
+		}
+
+		return tunPublicEgressProbeResult{
+			IP:        candidate,
+			Endpoint:  endpoint,
+			CheckedAt: time.Now().UTC(),
+		}
+	}
+
+	if lastError == "" {
+		lastError = "all public-IP probe endpoints failed"
+	}
+	return tunPublicEgressProbeResult{Error: lastError}
+}
+
+func coalesceTunEgressSource(value string, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }
 
 func (m *TunManager) generateRuntimeConfigLocked(settings *TunFeatureSettings, activeNodes []NodeRecord) error {
@@ -1956,6 +2245,43 @@ func saveTunDirectProbeCache(settings *TunFeatureSettings, cache tunDirectProbeC
 		return
 	}
 	_ = os.WriteFile(filepath.Join(settings.StateDir, tunDirectProbeCacheFileName), append(bytes.TrimRight(encoded, "\n"), '\n'), 0644)
+}
+
+func loadTunPublicEgressCache(settings *TunFeatureSettings) tunPublicEgressCache {
+	cache := tunPublicEgressCache{Version: tunPublicEgressCacheVersion}
+	if settings == nil || strings.TrimSpace(settings.StateDir) == "" {
+		return cache
+	}
+
+	raw, err := os.ReadFile(filepath.Join(settings.StateDir, tunPublicEgressCacheFile))
+	if err != nil {
+		return cache
+	}
+	if err := json.Unmarshal(raw, &cache); err != nil {
+		return tunPublicEgressCache{Version: tunPublicEgressCacheVersion}
+	}
+	if cache.Version != tunPublicEgressCacheVersion {
+		cache.Version = tunPublicEgressCacheVersion
+		cache.Direct = nil
+	}
+	return cache
+}
+
+func saveTunPublicEgressCache(settings *TunFeatureSettings, cache tunPublicEgressCache) {
+	if settings == nil || strings.TrimSpace(settings.StateDir) == "" {
+		return
+	}
+	cache.Version = tunPublicEgressCacheVersion
+
+	if err := os.MkdirAll(settings.StateDir, 0755); err != nil {
+		return
+	}
+
+	encoded, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(settings.StateDir, tunPublicEgressCacheFile), append(bytes.TrimRight(encoded, "\n"), '\n'), 0644)
 }
 
 func runTunDirectProbeRequests(requests []tunDirectProbeRequest) map[string]bool {
