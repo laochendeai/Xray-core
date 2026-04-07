@@ -261,6 +261,17 @@ export interface MachineEvent {
   details?: string
 }
 
+export interface TunEgressObservation {
+  status: string
+  route: string
+  ip?: string
+  checkedAt?: string
+  source?: string
+  stale?: boolean
+  note?: string
+  error?: string
+}
+
 export interface TunStatusResponse {
   status: string
   running: boolean
@@ -284,6 +295,8 @@ export interface TunStatusResponse {
   message: string
   lastOutput?: string
   diagnostics?: string[]
+  directEgress?: TunEgressObservation
+  proxyEgress?: TunEgressObservation
   machineState?: MachineState
   lastStateReason?: MachineStateReason
   lastStateChangedAt?: string
