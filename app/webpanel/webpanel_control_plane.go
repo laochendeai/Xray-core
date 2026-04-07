@@ -12,13 +12,13 @@ const (
 )
 
 type tunEligiblePoolSummary struct {
-	ActiveNodes               int
-	EligibleNodes             int
-	MinActiveNodes            int
-	ExcludedProtocol          int
-	ExcludedConsecutiveFails  int
-	ExcludedMissingDelay      int
-	ExcludedUncheckedOrStale  int
+	ActiveNodes              int
+	EligibleNodes            int
+	MinActiveNodes           int
+	ExcludedProtocol         int
+	ExcludedConsecutiveFails int
+	ExcludedMissingDelay     int
+	ExcludedUncheckedOrStale int
 }
 
 func (wp *WebPanel) tunStatusSnapshot() *TunStatus {
@@ -220,6 +220,8 @@ func (wp *WebPanel) appendTunStableDiagnostics(status *TunStatus, blocked bool) 
 		return nil
 	}
 
+	wp.appendTunRoutingDiagnostics(status)
+
 	_, summary := wp.eligibleTransparentNodes()
 	appendUniqueTunDiagnostic(status, tunStableModeDiagnostic)
 	appendUniqueTunDiagnostic(
@@ -250,6 +252,76 @@ func (wp *WebPanel) appendTunStableDiagnostics(status *TunStatus, blocked bool) 
 	}
 
 	return status
+}
+
+func (wp *WebPanel) appendTunRoutingDiagnostics(status *TunStatus) {
+	if status == nil || wp.tunManager == nil {
+		return
+	}
+
+	settings, err := wp.tunManager.SettingsSnapshot()
+	if err != nil {
+		appendUniqueTunDiagnostic(status, "Unable to build DNS/routing diagnostics: "+err.Error())
+		return
+	}
+
+	diagnostics := buildTunRoutingDiagnostics(settings)
+	status.RoutingDiagnostics = diagnostics
+	for _, diagnostic := range diagnostics {
+		appendUniqueTunDiagnostic(status, formatTunRoutingDiagnostic(diagnostic))
+	}
+}
+
+func buildTunRoutingDiagnostics(settings *TunFeatureSettings) []TunRoutingDiagnostic {
+	diagnostics := make([]TunRoutingDiagnostic, 0, 3)
+
+	if len(settings.ProtectDomains) > 0 {
+		diagnostics = append(diagnostics, TunRoutingDiagnostic{
+			Category: "protected_direct_domains",
+			DNSPath:  "dns-direct-local",
+			Resolver: "localhost",
+			Route:    "direct",
+			Reason:   "Domains matched by webpanel.tun.protectDomains resolve through local system DNS and are routed direct.",
+			Domains:  append([]string(nil), settings.ProtectDomains...),
+		})
+	}
+
+	if runtimeAssetExists(settings, "geosite.dat") {
+		diagnostics = append(diagnostics, TunRoutingDiagnostic{
+			Category: "cn_direct_domains",
+			DNSPath:  "dns-cn",
+			Resolver: strings.Join(defaultTunChinaDNS, ", "),
+			Route:    "direct",
+			Reason:   "Domains matched by geosite:cn resolve via China DNS and are routed direct.",
+			Domains:  []string{"geosite:cn"},
+		})
+	}
+
+	diagnostics = append(diagnostics, TunRoutingDiagnostic{
+		Category: "default_proxy_domains",
+		DNSPath:  "dns-remote",
+		Resolver: strings.Join(settings.RemoteDNS, ", "),
+		Route:    "proxy(node-pool-active)",
+		Reason:   "Domains not matched by protected direct rules or geosite:cn are resolved by remote DNS and routed through the active node pool.",
+	})
+
+	return diagnostics
+}
+
+func formatTunRoutingDiagnostic(diagnostic TunRoutingDiagnostic) string {
+	domainHint := ""
+	if len(diagnostic.Domains) > 0 {
+		domainHint = " domains=" + strings.Join(diagnostic.Domains, ", ")
+	}
+	return fmt.Sprintf(
+		"DNS/routing decision [%s]: dns=%s resolver=%s route=%s reason=%s%s",
+		diagnostic.Category,
+		diagnostic.DNSPath,
+		diagnostic.Resolver,
+		diagnostic.Route,
+		diagnostic.Reason,
+		domainHint,
+	)
 }
 
 func appendUniqueTunDiagnostic(status *TunStatus, diagnostic string) {

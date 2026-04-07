@@ -296,6 +296,112 @@ func TestWebPanelEnsureCleanStartupStateStopsRunningTun(t *testing.T) {
 	}
 }
 
+func TestTunStatusSnapshotIncludesRoutingDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	wp, paths := newTestControlPlaneWebPanel(t)
+	defer wp.subManager.Stop()
+
+	configRaw, err := os.ReadFile(wp.config.ConfigPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(configRaw, &config); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	webpanel := config["webpanel"].(map[string]any)
+	tun := webpanel["tun"].(map[string]any)
+	binPath := filepath.Join(filepath.Dir(wp.config.ConfigPath), "xray-test")
+	tun["binaryPath"] = binPath
+	updatedRaw, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.WriteFile(wp.config.ConfigPath, updatedRaw, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if err := os.WriteFile(binPath, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("write binary stub: %v", err)
+	}
+
+	// Ensure geosite-based CN direct diagnostics are included for the active binary-path lookup.
+	assetPath := filepath.Join(filepath.Dir(binPath), "geosite.dat")
+	if err := os.WriteFile(assetPath, []byte("stub"), 0o644); err != nil {
+		t.Fatalf("write geosite asset: %v", err)
+	}
+
+	status := wp.tunStatusSnapshot()
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+
+	var protected *TunRoutingDiagnostic
+	var cn *TunRoutingDiagnostic
+	var remote *TunRoutingDiagnostic
+
+	for i := range status.RoutingDiagnostics {
+		item := &status.RoutingDiagnostics[i]
+		switch item.Category {
+		case "protected_direct_domains":
+			protected = item
+		case "cn_direct_domains":
+			cn = item
+		case "default_proxy_domains":
+			remote = item
+		}
+	}
+
+	if protected == nil {
+		t.Fatal("expected protected_direct_domains routing diagnostic")
+	}
+	if protected.DNSPath != "dns-direct-local" || protected.Resolver != "localhost" || protected.Route != "direct" {
+		t.Fatalf("unexpected protected direct diagnostic: %#v", protected)
+	}
+	if len(protected.Domains) == 0 || protected.Domains[0] != "full:localhost" {
+		t.Fatalf("expected protected domains to include full:localhost, got %#v", protected.Domains)
+	}
+
+	if cn == nil {
+		t.Fatal("expected cn_direct_domains routing diagnostic")
+	}
+	if cn.DNSPath != "dns-cn" || cn.Route != "direct" {
+		t.Fatalf("unexpected cn direct diagnostic: %#v", cn)
+	}
+	if !strings.Contains(cn.Resolver, "223.5.5.5") {
+		t.Fatalf("expected cn resolver list, got %q", cn.Resolver)
+	}
+
+	if remote == nil {
+		t.Fatal("expected default_proxy_domains routing diagnostic")
+	}
+	if remote.DNSPath != "dns-remote" || !strings.Contains(remote.Route, "node-pool-active") {
+		t.Fatalf("unexpected remote routing diagnostic: %#v", remote)
+	}
+	if remote.Resolver != "1.1.1.1" {
+		t.Fatalf("expected remote resolver from tun settings, got %q", remote.Resolver)
+	}
+
+	diagnostics := strings.Join(status.Diagnostics, "\n")
+	for _, token := range []string{
+		"DNS/routing decision [protected_direct_domains]",
+		"dns=dns-direct-local",
+		"DNS/routing decision [cn_direct_domains]",
+		"dns=dns-cn",
+		"DNS/routing decision [default_proxy_domains]",
+		"dns=dns-remote",
+	} {
+		if !strings.Contains(diagnostics, token) {
+			t.Fatalf("expected diagnostics to contain %q\n%s", token, diagnostics)
+		}
+	}
+
+	if _, err := os.Stat(paths.runtimeConfigPath); err == nil {
+		// This test only inspects status diagnostics, no runtime config write is expected.
+		t.Fatalf("did not expect runtime config write for diagnostic snapshot test: %s", paths.runtimeConfigPath)
+	}
+}
+
 type controlPlaneTestPaths struct {
 	stateDir          string
 	helperStatePath   string
