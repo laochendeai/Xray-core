@@ -29,6 +29,7 @@ BYPASS_RULE_PREF="${XRAY_TUN_BYPASS_RULE_PREF:-12000}"
 BYPASS_UID_RANGE="${XRAY_TUN_BYPASS_UID_RANGE:-0-0}"
 CAPTURE_ROUTE_TABLE_ID="${XRAY_TUN_CAPTURE_ROUTE_TABLE_ID:-2028}"
 CAPTURE_DNS_RULE_PREF="${XRAY_TUN_CAPTURE_DNS_RULE_PREF:-12010}"
+CAPTURE_UDP_443_RULE_PREF="${XRAY_TUN_CAPTURE_UDP_443_RULE_PREF:-12015}"
 CAPTURE_TCP_RULE_PREF="${XRAY_TUN_CAPTURE_TCP_RULE_PREF:-12020}"
 
 require_root() {
@@ -154,6 +155,7 @@ BYPASS_RULE_PREF='$BYPASS_RULE_PREF'
 BYPASS_UID_RANGE='$BYPASS_UID_RANGE'
 CAPTURE_ROUTE_TABLE_ID='$CAPTURE_ROUTE_TABLE_ID'
 CAPTURE_DNS_RULE_PREF='$CAPTURE_DNS_RULE_PREF'
+CAPTURE_UDP_443_RULE_PREF='$CAPTURE_UDP_443_RULE_PREF'
 CAPTURE_TCP_RULE_PREF='$CAPTURE_TCP_RULE_PREF'
 EOF
   chmod 0644 "$STATE_FILE" 2>/dev/null || true
@@ -182,6 +184,7 @@ clear_upstream_bypass_rules() {
 clear_policy_routes() {
   ip -4 rule del pref "$BYPASS_RULE_PREF" 2>/dev/null || true
   ip -4 rule del pref "$CAPTURE_DNS_RULE_PREF" 2>/dev/null || true
+  ip -4 rule del pref "$CAPTURE_UDP_443_RULE_PREF" 2>/dev/null || true
   ip -4 rule del pref "$CAPTURE_TCP_RULE_PREF" 2>/dev/null || true
   ip route flush table "$ROUTE_TABLE_ID" 2>/dev/null || true
   ip route flush table "$CAPTURE_ROUTE_TABLE_ID" 2>/dev/null || true
@@ -242,6 +245,9 @@ prepare_capture_route_table() {
 
   ip -4 rule del pref "$CAPTURE_DNS_RULE_PREF" 2>/dev/null || true
   ip -4 rule add pref "$CAPTURE_DNS_RULE_PREF" ipproto udp dport 53 lookup "$CAPTURE_ROUTE_TABLE_ID"
+
+  ip -4 rule del pref "$CAPTURE_UDP_443_RULE_PREF" 2>/dev/null || true
+  ip -4 rule add pref "$CAPTURE_UDP_443_RULE_PREF" ipproto udp dport 443 lookup "$CAPTURE_ROUTE_TABLE_ID"
 
   ip -4 rule del pref "$CAPTURE_TCP_RULE_PREF" 2>/dev/null || true
   ip -4 rule add pref "$CAPTURE_TCP_RULE_PREF" ipproto tcp lookup "$CAPTURE_ROUTE_TABLE_ID"
@@ -399,6 +405,7 @@ cleanup_network_state() {
   BYPASS_UID_RANGE="${BYPASS_UID_RANGE:-0-0}"
   CAPTURE_ROUTE_TABLE_ID="${CAPTURE_ROUTE_TABLE_ID:-2028}"
   CAPTURE_DNS_RULE_PREF="${CAPTURE_DNS_RULE_PREF:-12010}"
+  CAPTURE_UDP_443_RULE_PREF="${CAPTURE_UDP_443_RULE_PREF:-12015}"
   CAPTURE_TCP_RULE_PREF="${CAPTURE_TCP_RULE_PREF:-12020}"
 
   if [[ -z "$default_gw" || -z "$default_dev" ]]; then
@@ -534,6 +541,9 @@ is_tun_active() {
     return 0
   fi
   if ip -4 rule show pref "$CAPTURE_TCP_RULE_PREF" 2>/dev/null | grep -Eq "ipproto tcp .*lookup $CAPTURE_ROUTE_TABLE_ID|ipproto tcp lookup $CAPTURE_ROUTE_TABLE_ID"; then
+    return 0
+  fi
+  if ip -4 rule show pref "$CAPTURE_UDP_443_RULE_PREF" 2>/dev/null | grep -Eq "ipproto udp.* dport 443 .*lookup $CAPTURE_ROUTE_TABLE_ID|ipproto udp dport 443 lookup $CAPTURE_ROUTE_TABLE_ID"; then
     return 0
   fi
   ip route show table "$CAPTURE_ROUTE_TABLE_ID" 0.0.0.0/1 dev "$tun_name" | grep -q .

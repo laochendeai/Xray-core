@@ -931,7 +931,7 @@ func buildTunRuntimeConfigWithDirectProbeResults(raw []byte, settings *TunFeatur
 	resolvedProbeResults := resolveTunDirectProbeResults(settings, existingRules, directProbeResults)
 	priorityRules, _ := splitTunRoutingRules(existingRules)
 	priorityRules = filterTunPriorityRules(priorityRules, settings, resolvedProbeResults)
-	prependRules := make([]interface{}, 0, 6)
+	prependRules := make([]interface{}, 0, 5)
 	prependRules = append(prependRules, map[string]interface{}{
 		"type":        "field",
 		"inboundTag":  []string{"tun-in"},
@@ -952,13 +952,6 @@ func buildTunRuntimeConfigWithDirectProbeResults(raw []byte, settings *TunFeatur
 			"outboundTag": "direct",
 		})
 	}
-	prependRules = append(prependRules, map[string]interface{}{
-		"type":        "field",
-		"inboundTag":  []string{"tun-in"},
-		"network":     "udp",
-		"port":        "443",
-		"outboundTag": "block",
-	})
 	if runtimeAssetExists(settings, "geosite.dat") {
 		prependRules = append(prependRules, map[string]interface{}{
 			"type":        "field",
