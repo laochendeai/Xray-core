@@ -104,6 +104,15 @@ type TunEditableSettings struct {
 	ProtectDomains  []string `json:"protectDomains"`
 }
 
+type TunRoutingDiagnostic struct {
+	Category string   `json:"category"`
+	DNSPath  string   `json:"dnsPath"`
+	Resolver string   `json:"resolver"`
+	Route    string   `json:"route"`
+	Reason   string   `json:"reason"`
+	Domains  []string `json:"domains,omitempty"`
+}
+
 type tunDirectProbeCache struct {
 	Version int                                 `json:"version"`
 	Entries map[string]tunDirectProbeCacheEntry `json:"entries"`
@@ -144,34 +153,35 @@ type tunConfigEnvelope struct {
 }
 
 type TunStatus struct {
-	Status                      string                `json:"status"`
-	Running                     bool                  `json:"running"`
-	Available                   bool                  `json:"available"`
-	AllowRemote                 bool                  `json:"allowRemote"`
-	UseSudo                     bool                  `json:"useSudo"`
-	HelperExists                bool                  `json:"helperExists"`
-	ElevationReady              bool                  `json:"elevationReady"`
-	HelperCurrent               bool                  `json:"helperCurrent"`
-	BinaryCurrent               bool                  `json:"binaryCurrent"`
-	PrivilegeInstallRecommended bool                  `json:"privilegeInstallRecommended"`
-	BinaryPath                  string                `json:"binaryPath"`
-	HelperPath                  string                `json:"helperPath"`
-	StateDir                    string                `json:"stateDir"`
-	RuntimeConfigPath           string                `json:"runtimeConfigPath"`
-	InterfaceName               string                `json:"interfaceName"`
-	MTU                         uint32                `json:"mtu"`
-	RemoteDNS                   []string              `json:"remoteDns"`
-	ConfigPath                  string                `json:"configPath"`
-	XrayBinary                  string                `json:"xrayBinary"`
-	Message                     string                `json:"message"`
-	LastOutput                  string                `json:"lastOutput,omitempty"`
-	Diagnostics                 []string              `json:"diagnostics,omitempty"`
-	DirectEgress                *TunEgressObservation `json:"directEgress,omitempty"`
-	ProxyEgress                 *TunEgressObservation `json:"proxyEgress,omitempty"`
-	MachineState                MachineState          `json:"machineState,omitempty"`
-	LastStateReason             MachineStateReason    `json:"lastStateReason,omitempty"`
-	LastStateChangedAt          *time.Time            `json:"lastStateChangedAt,omitempty"`
-	RecentMachineEvents         []MachineEvent        `json:"recentMachineEvents,omitempty"`
+	Status                      string                 `json:"status"`
+	Running                     bool                   `json:"running"`
+	Available                   bool                   `json:"available"`
+	AllowRemote                 bool                   `json:"allowRemote"`
+	UseSudo                     bool                   `json:"useSudo"`
+	HelperExists                bool                   `json:"helperExists"`
+	ElevationReady              bool                   `json:"elevationReady"`
+	HelperCurrent               bool                   `json:"helperCurrent"`
+	BinaryCurrent               bool                   `json:"binaryCurrent"`
+	PrivilegeInstallRecommended bool                   `json:"privilegeInstallRecommended"`
+	BinaryPath                  string                 `json:"binaryPath"`
+	HelperPath                  string                 `json:"helperPath"`
+	StateDir                    string                 `json:"stateDir"`
+	RuntimeConfigPath           string                 `json:"runtimeConfigPath"`
+	InterfaceName               string                 `json:"interfaceName"`
+	MTU                         uint32                 `json:"mtu"`
+	RemoteDNS                   []string               `json:"remoteDns"`
+	ConfigPath                  string                 `json:"configPath"`
+	XrayBinary                  string                 `json:"xrayBinary"`
+	Message                     string                 `json:"message"`
+	LastOutput                  string                 `json:"lastOutput,omitempty"`
+	Diagnostics                 []string               `json:"diagnostics,omitempty"`
+	DirectEgress                *TunEgressObservation  `json:"directEgress,omitempty"`
+	ProxyEgress                 *TunEgressObservation  `json:"proxyEgress,omitempty"`
+	RoutingDiagnostics          []TunRoutingDiagnostic `json:"routingDiagnostics,omitempty"`
+	MachineState                MachineState           `json:"machineState,omitempty"`
+	LastStateReason             MachineStateReason     `json:"lastStateReason,omitempty"`
+	LastStateChangedAt          *time.Time             `json:"lastStateChangedAt,omitempty"`
+	RecentMachineEvents         []MachineEvent         `json:"recentMachineEvents,omitempty"`
 }
 
 type TunEgressObservation struct {
@@ -646,6 +656,13 @@ func (m *TunManager) EditableSettings() (*TunEditableSettings, error) {
 	defer m.mu.Unlock()
 
 	return m.loadEditableSettingsLocked()
+}
+
+func (m *TunManager) SettingsSnapshot() (*TunFeatureSettings, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.loadSettings()
 }
 
 func (m *TunManager) UpdateEditableSettings(next TunEditableSettings) (*TunEditableSettings, error) {
