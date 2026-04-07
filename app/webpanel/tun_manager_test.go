@@ -854,6 +854,7 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 	}
 	hasChinaDNS := false
 	hasRemoteDNS := false
+	hasProtectedDNS := false
 	for _, rawServer := range servers {
 		server, ok := rawServer.(map[string]any)
 		if !ok {
@@ -864,6 +865,16 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 			if server["address"] == "tcp://223.5.5.5" {
 				hasChinaDNS = true
 			}
+			if domains, ok := server["domains"].([]any); ok {
+				for _, rawDomain := range domains {
+					if rawDomain == "full:localhost" {
+						hasProtectedDNS = true
+						if _, exists := server["expectIPs"]; exists {
+							t.Fatalf("expected protected direct-domain DNS entry without geoip expectation, got %#v", server)
+						}
+					}
+				}
+			}
 		case "dns-remote":
 			if server["address"] == "tcp://1.1.1.1" {
 				hasRemoteDNS = true
@@ -872,6 +883,9 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 	}
 	if !hasChinaDNS {
 		t.Fatal("expected china split-dns server in runtime config")
+	}
+	if !hasProtectedDNS {
+		t.Fatal("expected protected direct-domain DNS server in runtime config")
 	}
 	if !hasRemoteDNS {
 		t.Fatal("expected remote split-dns server in runtime config")

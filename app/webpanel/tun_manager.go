@@ -1170,19 +1170,31 @@ func buildTunDNSConfig(settings *TunFeatureSettings) map[string]interface{} {
 	servers := make([]interface{}, 0, len(defaultTunChinaDNS)+len(settings.RemoteDNS))
 	hasGeosite := runtimeAssetExists(settings, "geosite.dat")
 	hasGeoip := runtimeAssetExists(settings, "geoip.dat")
+	protectedDomains := uniqStrings(append([]string{}, settings.ProtectDomains...))
 
-	if hasGeosite {
+	if hasGeosite || len(protectedDomains) > 0 {
 		for _, address := range defaultTunChinaDNS {
-			server := map[string]interface{}{
-				"address":      normalizeTunResolverAddress(address),
-				"domains":      []string{"geosite:cn"},
-				"skipFallback": true,
-				"tag":          "dns-cn",
+			if hasGeosite {
+				server := map[string]interface{}{
+					"address":      normalizeTunResolverAddress(address),
+					"domains":      []string{"geosite:cn"},
+					"skipFallback": true,
+					"tag":          "dns-cn",
+				}
+				if hasGeoip {
+					server["expectIPs"] = []string{"geoip:cn"}
+				}
+				servers = append(servers, server)
 			}
-			if hasGeoip {
-				server["expectIPs"] = []string{"geoip:cn"}
+
+			if len(protectedDomains) > 0 {
+				servers = append(servers, map[string]interface{}{
+					"address":      normalizeTunResolverAddress(address),
+					"domains":      protectedDomains,
+					"skipFallback": true,
+					"tag":          "dns-cn",
+				})
 			}
-			servers = append(servers, server)
 		}
 	}
 
