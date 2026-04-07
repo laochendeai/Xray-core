@@ -950,7 +950,7 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 	}
 }
 
-func TestBuildTunRuntimeConfigBlocksUDP443BeforeTunCatchAllAndAddsBlockOutbound(t *testing.T) {
+func TestBuildTunRuntimeConfigOmitsUDP443BlockRuleAndAddsTunCatchAll(t *testing.T) {
 	t.Parallel()
 
 	baseConfig := []byte(`{
@@ -1019,7 +1019,7 @@ func TestBuildTunRuntimeConfigBlocksUDP443BeforeTunCatchAllAndAddsBlockOutbound(
 	}
 
 	dnsRuleIndex := -1
-	udp443BlockIndex := -1
+	udp443BlockFound := false
 	tunCatchAllIndex := -1
 	for index, rawRule := range rules {
 		rule, ok := rawRule.(map[string]any)
@@ -1030,7 +1030,7 @@ func TestBuildTunRuntimeConfigBlocksUDP443BeforeTunCatchAllAndAddsBlockOutbound(
 			dnsRuleIndex = index
 		}
 		if inboundTags, ok := rule["inboundTag"].([]any); ok && len(inboundTags) == 1 && inboundTags[0] == "tun-in" && rule["network"] == "udp" && rule["port"] == "443" && rule["outboundTag"] == "block" {
-			udp443BlockIndex = index
+			udp443BlockFound = true
 		}
 		if inboundTags, ok := rule["inboundTag"].([]any); ok && len(inboundTags) == 1 && inboundTags[0] == "tun-in" && rule["balancerTag"] == "node-pool-active" {
 			tunCatchAllIndex = index
@@ -1040,17 +1040,14 @@ func TestBuildTunRuntimeConfigBlocksUDP443BeforeTunCatchAllAndAddsBlockOutbound(
 	if dnsRuleIndex == -1 {
 		t.Fatal("expected tun DNS interception rule")
 	}
-	if udp443BlockIndex == -1 {
-		t.Fatal("expected udp/443 block rule in tun runtime")
+	if udp443BlockFound {
+		t.Fatal("did not expect udp/443 block rule in tun runtime")
 	}
 	if tunCatchAllIndex == -1 {
 		t.Fatal("expected tun catch-all rule")
 	}
-	if dnsRuleIndex >= udp443BlockIndex {
-		t.Fatalf("expected udp/443 block rule after DNS routing, got dns=%d udp443=%d", dnsRuleIndex, udp443BlockIndex)
-	}
-	if udp443BlockIndex >= tunCatchAllIndex {
-		t.Fatalf("expected udp/443 block rule before tun catch-all, got udp443=%d tun=%d", udp443BlockIndex, tunCatchAllIndex)
+	if dnsRuleIndex >= tunCatchAllIndex {
+		t.Fatalf("expected tun catch-all rule after DNS routing, got dns=%d tun=%d", dnsRuleIndex, tunCatchAllIndex)
 	}
 }
 

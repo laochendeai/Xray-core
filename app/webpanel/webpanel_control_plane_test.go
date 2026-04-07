@@ -151,7 +151,7 @@ func TestWebPanelStartTransparentModeBlocksWhenEligiblePoolBelowMinimumEvenIfAct
 
 	diagnostics := strings.Join(status.Diagnostics, "\n")
 	for _, token := range []string{
-		"Stable mode only captures TCP and UDP/53",
+		"Stable mode captures TCP plus UDP/53 and UDP/443",
 		"Transparent-mode eligible nodes: 1 / active 2 / minimum required 2.",
 		"Excluded active nodes: hysteria2=1",
 		"Transparent mode only starts when the stable eligible pool meets the minimum size.",

@@ -131,6 +131,12 @@ check_network_surface() {
     fail "Missing UDP/53 capture policy rule"
   fi
 
+  if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_UDP_443_RULE_PREF}:.*ipproto udp.* dport 443 .*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+    pass "UDP/443 capture policy rule is active"
+  else
+    fail "Missing UDP/443 capture policy rule"
+  fi
+
   if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_TCP_RULE_PREF}:.*ipproto tcp .*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b|^${WEBPANEL_CAPTURE_TCP_RULE_PREF}:.*ipproto tcp lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
     pass "TCP capture policy rule is active"
   else
@@ -257,6 +263,12 @@ run_post_reboot() {
       fail "UDP/53 capture rule still exists after reboot"
     else
       pass "UDP/53 capture rule is absent after reboot"
+    fi
+
+    if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_UDP_443_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+      fail "UDP/443 capture rule still exists after reboot"
+    else
+      pass "UDP/443 capture rule is absent after reboot"
     fi
 
     if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_TCP_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
