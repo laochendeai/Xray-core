@@ -854,26 +854,27 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 	}
 	hasChinaDNS := false
 	hasRemoteDNS := false
-	hasProtectedDNS := false
+	hasProtectedLocalDNS := false
 	for _, rawServer := range servers {
 		server, ok := rawServer.(map[string]any)
 		if !ok {
 			continue
 		}
 		switch server["tag"] {
-		case "dns-cn":
-			if server["address"] == "tcp://223.5.5.5" {
-				hasChinaDNS = true
+		case "dns-direct-local":
+			if server["address"] != "localhost" {
+				t.Fatalf("expected protected direct-domain DNS entry to use local system DNS, got %#v", server)
 			}
 			if domains, ok := server["domains"].([]any); ok {
 				for _, rawDomain := range domains {
 					if rawDomain == "full:localhost" {
-						hasProtectedDNS = true
-						if _, exists := server["expectIPs"]; exists {
-							t.Fatalf("expected protected direct-domain DNS entry without geoip expectation, got %#v", server)
-						}
+						hasProtectedLocalDNS = true
 					}
 				}
+			}
+		case "dns-cn":
+			if server["address"] == "tcp://223.5.5.5" {
+				hasChinaDNS = true
 			}
 		case "dns-remote":
 			if server["address"] == "tcp://1.1.1.1" {
@@ -884,8 +885,8 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 	if !hasChinaDNS {
 		t.Fatal("expected china split-dns server in runtime config")
 	}
-	if !hasProtectedDNS {
-		t.Fatal("expected protected direct-domain DNS server in runtime config")
+	if !hasProtectedLocalDNS {
+		t.Fatal("expected protected direct-domain local-system DNS server in runtime config")
 	}
 	if !hasRemoteDNS {
 		t.Fatal("expected remote split-dns server in runtime config")
@@ -902,6 +903,7 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 
 	dnsRuleIndex := -1
 	protectCIDRIndex := -1
+	dnsDirectLocalRouteIndex := -1
 	dnsCNRouteIndex := -1
 	dnsRemoteRouteIndex := -1
 	tunCatchAllIndex := -1
@@ -915,6 +917,9 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 		}
 		if ips, ok := rule["ip"].([]any); ok && len(ips) == 1 && ips[0] == "127.0.0.0/8" && rule["outboundTag"] == "direct" {
 			protectCIDRIndex = index
+		}
+		if inboundTags, ok := rule["inboundTag"].([]any); ok && len(inboundTags) == 1 && inboundTags[0] == "dns-direct-local" && rule["outboundTag"] == "direct" {
+			dnsDirectLocalRouteIndex = index
 		}
 		if inboundTags, ok := rule["inboundTag"].([]any); ok && len(inboundTags) == 1 && inboundTags[0] == "dns-cn" && rule["outboundTag"] == "direct" {
 			dnsCNRouteIndex = index
@@ -932,6 +937,9 @@ func TestBuildTunRuntimeConfigAddsSplitDNSAndRoutesDNSBeforeCatchAll(t *testing.
 	}
 	if protectCIDRIndex == -1 {
 		t.Fatal("expected protect CIDR direct rule")
+	}
+	if dnsDirectLocalRouteIndex == -1 {
+		t.Fatal("expected dns-direct-local direct route")
 	}
 	if dnsCNRouteIndex == -1 {
 		t.Fatal("expected dns-cn direct route")

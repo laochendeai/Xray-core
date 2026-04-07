@@ -944,6 +944,11 @@ func buildTunRuntimeConfigWithDirectProbeResults(raw []byte, settings *TunFeatur
 			"domain":      settings.ProtectDomains,
 			"outboundTag": "direct",
 		})
+		prependRules = append(prependRules, map[string]interface{}{
+			"type":        "field",
+			"inboundTag":  []string{"dns-direct-local"},
+			"outboundTag": "direct",
+		})
 	}
 	if len(settings.ProtectCIDRs) > 0 {
 		prependRules = append(prependRules, map[string]interface{}{
@@ -1160,34 +1165,32 @@ func buildActivePoolOutbounds(activeNodes []NodeRecord) ([]interface{}, error) {
 }
 
 func buildTunDNSConfig(settings *TunFeatureSettings) map[string]interface{} {
-	servers := make([]interface{}, 0, len(defaultTunChinaDNS)+len(settings.RemoteDNS))
+	servers := make([]interface{}, 0, 1+len(defaultTunChinaDNS)+len(settings.RemoteDNS))
 	hasGeosite := runtimeAssetExists(settings, "geosite.dat")
 	hasGeoip := runtimeAssetExists(settings, "geoip.dat")
 	protectedDomains := uniqStrings(append([]string{}, settings.ProtectDomains...))
 
-	if hasGeosite || len(protectedDomains) > 0 {
-		for _, address := range defaultTunChinaDNS {
-			if hasGeosite {
-				server := map[string]interface{}{
-					"address":      normalizeTunResolverAddress(address),
-					"domains":      []string{"geosite:cn"},
-					"skipFallback": true,
-					"tag":          "dns-cn",
-				}
-				if hasGeoip {
-					server["expectIPs"] = []string{"geoip:cn"}
-				}
-				servers = append(servers, server)
-			}
+	if len(protectedDomains) > 0 {
+		servers = append(servers, map[string]interface{}{
+			"address":      "localhost",
+			"domains":      protectedDomains,
+			"skipFallback": true,
+			"tag":          "dns-direct-local",
+		})
+	}
 
-			if len(protectedDomains) > 0 {
-				servers = append(servers, map[string]interface{}{
-					"address":      normalizeTunResolverAddress(address),
-					"domains":      protectedDomains,
-					"skipFallback": true,
-					"tag":          "dns-cn",
-				})
+	if hasGeosite {
+		for _, address := range defaultTunChinaDNS {
+			server := map[string]interface{}{
+				"address":      normalizeTunResolverAddress(address),
+				"domains":      []string{"geosite:cn"},
+				"skipFallback": true,
+				"tag":          "dns-cn",
 			}
+			if hasGeoip {
+				server["expectIPs"] = []string{"geoip:cn"}
+			}
+			servers = append(servers, server)
 		}
 	}
 
