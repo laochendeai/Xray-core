@@ -253,9 +253,13 @@ webpanel_capture_snapshot() {
 
   tun_out="$snapshot_dir/tun-status.json"
   pool_out="$snapshot_dir/node-pool.json"
+  settings_out="$snapshot_dir/tun-settings.json"
 
   webpanel_api_get "$token" "/api/v1/tun/status" "$tun_out" >/dev/null
   webpanel_api_get "$token" "/api/v1/node-pool" "$pool_out" >/dev/null
+  if [[ "$(webpanel_api_get "$token" "/api/v1/tun/settings" "$settings_out" 2>/dev/null || true)" != "200" ]]; then
+    rm -f "$settings_out"
+  fi
 
   if [[ -f "$WEBPANEL_CONTROL_PLANE_STATE_PATH" ]]; then
     cp "$WEBPANEL_CONTROL_PLANE_STATE_PATH" "$snapshot_dir/control_plane_state.json"
@@ -268,6 +272,12 @@ webpanel_capture_snapshot() {
   fi
   if [[ -f "$WEBPANEL_RUNTIME_CONFIG_PATH" ]]; then
     cp "$WEBPANEL_RUNTIME_CONFIG_PATH" "$snapshot_dir/runtime-config.json"
+  fi
+  if [[ -f "$WEBPANEL_STATE_DIR/route-probe-cache.json" ]]; then
+    cp "$WEBPANEL_STATE_DIR/route-probe-cache.json" "$snapshot_dir/route-probe-cache.json"
+  fi
+  if [[ -f "$WEBPANEL_STATE_DIR/egress-probe-cache.json" ]]; then
+    cp "$WEBPANEL_STATE_DIR/egress-probe-cache.json" "$snapshot_dir/egress-probe-cache.json"
   fi
   if command -v ip >/dev/null 2>&1; then
     ip link show >"$snapshot_dir/ip-link.txt" 2>&1 || true

@@ -37,6 +37,56 @@ Recommended installation flow:
    sudo ./scripts/install-webpanel-systemd-service.sh --config /path/to/config.json
    ```
 
+## Transparent TUN Baseline (#38)
+
+Use this when you need a repeatable correctness baseline after rebuilding or restarting the local service.
+
+1. Rebuild and restart the local binary:
+   ```bash
+   make build
+   ./xray run -c /path/to/config.json
+   ```
+2. Run the standard local validation gate:
+   ```bash
+   bash scripts/check.sh
+   ```
+3. Run the real-machine baseline flow:
+   ```bash
+   ./scripts/verify-webpanel-tun-baseline.sh --config /path/to/config.json
+   ```
+
+If the protected direct site is not derivable from `webpanel.tun.protectDomains`, pass one explicitly:
+
+```bash
+./scripts/verify-webpanel-tun-baseline.sh \
+  --config /path/to/config.json \
+  --protected-url https://hifly.cc/study/feature/index.html
+```
+
+What this flow verifies:
+
+- `directEgress` before and after TUN enablement
+- same-user public IP changes once TUN is running, while the independent direct egress record stays stable
+- runtime DNS/routing markers in `runtime/tun/config.json`
+- one protected direct URL under transparent mode
+- one forced proxy-path probe via an active outbound
+- one HTTP/3 probe when local `curl` supports `--http3`; otherwise it records the UDP/443 and proxy-path prerequisites instead
+
+Artifacts:
+
+- `preflight.txt`
+- `baseline-summary.txt`
+- `baseline-summary.json`
+- per-stage snapshot directories with:
+  - `tun-status.json`
+  - `tun-settings.json`
+  - `runtime-config.json`
+  - `route-probe-cache.json`
+  - `egress-probe-cache.json`
+  - route / rule / `resolvectl` captures
+
+The fallback rehearsal remains a separate, extended verification and is not part of this minimum baseline.
+
 ## Verification Scripts
 
 ### 1. Read-Only Preflight
