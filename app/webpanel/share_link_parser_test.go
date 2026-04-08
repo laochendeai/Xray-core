@@ -1,6 +1,7 @@
 package webpanel
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 )
@@ -45,6 +46,37 @@ func TestParseSubscriptionContentStripsUTF8BOMOnFirstLine(t *testing.T) {
 	}
 	if links[1].Protocol != "vless" {
 		t.Fatalf("expected second link to be vless, got %q", links[1].Protocol)
+	}
+}
+
+func TestParseSubscriptionContentIncludesAnyTLS(t *testing.T) {
+	t.Parallel()
+
+	payload := "anytls://secret@example.cc:8443/?sni=edge.example.cc#any"
+	content := base64.StdEncoding.EncodeToString([]byte(payload))
+
+	links, err := ParseSubscriptionContent(content)
+	if err != nil {
+		t.Fatalf("ParseSubscriptionContent returned error: %v", err)
+	}
+
+	found := false
+	for _, link := range links {
+		if link.Protocol == "anytls" {
+			found = true
+			if link.Address != "example.cc" {
+				t.Fatalf("expected anytls address example.cc, got %q", link.Address)
+			}
+			if link.Port != 8443 {
+				t.Fatalf("expected anytls port 8443, got %d", link.Port)
+			}
+			if link.Password != "secret" {
+				t.Fatalf("expected anytls password secret, got %q", link.Password)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected anytls link to be parsed")
 	}
 }
 
@@ -107,6 +139,48 @@ func TestParseShareLinkURIParsesHysteria2(t *testing.T) {
 	}
 }
 
+func TestParseShareLinkURIParsesAnyTLS(t *testing.T) {
+	t.Parallel()
+
+	req, err := ParseShareLinkURI(`anytls://hunter123@any.example.com:8443/?sni=edge.example.com&insecure=1#any`)
+	if err != nil {
+		t.Fatalf("ParseShareLinkURI returned error: %v", err)
+	}
+
+	if req.Protocol != "anytls" {
+		t.Fatalf("expected anytls protocol, got %q", req.Protocol)
+	}
+	if req.Address != "any.example.com" {
+		t.Fatalf("expected address any.example.com, got %q", req.Address)
+	}
+	if req.Port != 8443 {
+		t.Fatalf("expected port 8443, got %d", req.Port)
+	}
+	if req.Password != "hunter123" {
+		t.Fatalf("expected password hunter123, got %q", req.Password)
+	}
+	if req.AllowInsecure != true {
+		t.Fatal("expected allow insecure to be true")
+	}
+	if req.Type != "tcp" {
+		t.Fatalf("expected transport type tcp, got %q", req.Type)
+	}
+	if req.TLS != "tls" {
+		t.Fatalf("expected tls transport, got %q", req.TLS)
+	}
+	if req.SNI != "edge.example.com" {
+		t.Fatalf("expected sni edge.example.com, got %q", req.SNI)
+	}
+
+	defaultReq, err := ParseShareLinkURI(`anytls://secret@example.com/?sni=edge`)
+	if err != nil {
+		t.Fatalf("ParseShareLinkURI returned error: %v", err)
+	}
+	if defaultReq.Port != 443 {
+		t.Fatalf("expected default port 443, got %d", defaultReq.Port)
+	}
+}
+
 func TestBuildOutboundJSONUsesTopLevelHysteriaAddress(t *testing.T) {
 	t.Parallel()
 
@@ -137,5 +211,41 @@ func TestBuildOutboundJSONUsesTopLevelHysteriaAddress(t *testing.T) {
 	}
 	if _, ok := settings["server"]; ok {
 		t.Fatal("did not expect nested hysteria server object")
+	}
+}
+
+func TestBuildOutboundJSONSupportsAnyTLS(t *testing.T) {
+	t.Parallel()
+
+	req, err := ParseShareLinkURI(`anytls://secret@any.example.com:8443/?sni=edge.example.com#any`)
+	if err != nil {
+		t.Fatalf("ParseShareLinkURI returned error: %v", err)
+	}
+
+	outboundJSON, err := BuildOutboundJSON(req, "pool-anytls")
+	if err != nil {
+		t.Fatalf("BuildOutboundJSON returned error: %v", err)
+	}
+
+	var outbound map[string]any
+	if err := json.Unmarshal(outboundJSON, &outbound); err != nil {
+		t.Fatalf("unmarshal outbound JSON: %v", err)
+	}
+
+	if pvc, ok := outbound["protocol"]; !ok || pvc != "anytls" {
+		t.Fatalf("expected protocol anytls, got %#v", outbound["protocol"])
+	}
+	settings, ok := outbound["settings"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected settings object, got %T", outbound["settings"])
+	}
+	if got := settings["address"]; got != "any.example.com" {
+		t.Fatalf("expected address any.example.com, got %#v", got)
+	}
+	if got := settings["port"]; got != float64(8443) {
+		t.Fatalf("expected port 8443, got %#v", got)
+	}
+	if got := settings["password"]; got != "secret" {
+		t.Fatalf("expected password secret, got %#v", got)
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/xtls/xray-core/app/proxyman"
 	"github.com/xtls/xray-core/common/serial"
+	anytls "github.com/xtls/xray-core/proxy/anytls"
 	hysteriaproxy "github.com/xtls/xray-core/proxy/hysteria"
 	shadowsocks2022 "github.com/xtls/xray-core/proxy/shadowsocks_2022"
 	internettransport "github.com/xtls/xray-core/transport/internet"
@@ -39,6 +40,30 @@ func TestDecodeOutboundHandlerConfigSupportsStandardJSON(t *testing.T) {
 	}
 	if config.ProxySettings == nil {
 		t.Fatal("expected proxy settings to be populated")
+	}
+}
+
+func TestDecodeStandardProxySettingsSupportsAnyTLS(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{"address":"any.example.com","port":8443,"password":"secret"}`)
+	config, err := decodeStandardProxySettings("anytls", raw)
+	if err != nil {
+		t.Fatalf("decode standard anytls settings: %v", err)
+	}
+
+	proxyConfig, ok := config.(*anytls.Config)
+	if !ok {
+		t.Fatalf("expected anytls config, got %T", config)
+	}
+	if proxyConfig.Address != "any.example.com" {
+		t.Fatalf("expected address any.example.com, got %q", proxyConfig.Address)
+	}
+	if proxyConfig.Port != 8443 {
+		t.Fatalf("expected port 8443, got %d", proxyConfig.Port)
+	}
+	if proxyConfig.Password != "secret" {
+		t.Fatalf("expected password secret, got %q", proxyConfig.Password)
 	}
 }
 
