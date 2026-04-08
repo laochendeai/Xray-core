@@ -36,6 +36,8 @@ func ParseShareLinkURI(uri string) (*ShareLinkRequest, error) {
 		return parseSSURI(uri)
 	case "hysteria", "hysteria2", "hy2":
 		return parseHysteria2URI(uri)
+	case "anytls":
+		return parseAnyTLSURI(uri)
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", scheme)
 	}
@@ -263,6 +265,70 @@ func parseTrojanURI(uri string) (*ShareLinkRequest, error) {
 	return req, nil
 }
 
+func parseAnyTLSURI(uri string) (*ShareLinkRequest, error) {
+	body := uri[len("anytls://"):]
+
+	remark := ""
+	if idx := strings.LastIndex(body, "#"); idx >= 0 {
+		remark, _ = url.PathUnescape(body[idx+1:])
+		body = body[:idx]
+	}
+
+	queryStr := ""
+	if qIdx := strings.Index(body, "?"); qIdx >= 0 {
+		queryStr = body[qIdx+1:]
+		body = body[:qIdx]
+	}
+
+	password := ""
+	hostPart := strings.TrimSpace(body)
+	if hostPart == "" {
+		return nil, fmt.Errorf("invalid AnyTLS URI: missing address")
+	}
+
+	if atIdx := strings.Index(hostPart, "@"); atIdx >= 0 {
+		password, _ = url.PathUnescape(hostPart[:atIdx])
+		hostPart = hostPart[atIdx+1:]
+	}
+
+	hostPart = strings.TrimRight(hostPart, "/")
+	if hostPart == "" {
+		return nil, fmt.Errorf("invalid AnyTLS URI: missing address")
+	}
+
+	address := hostPart
+	port := 443
+	if h, p, err := splitHostPort(hostPart); err == nil {
+		address = h
+		if p != "" {
+			portVal, err := strconv.Atoi(p)
+			if err != nil {
+				return nil, fmt.Errorf("invalid AnyTLS URI port: %w", err)
+			}
+			port = portVal
+		}
+	} else {
+		if !strings.Contains(err.Error(), "missing port") {
+			return nil, fmt.Errorf("invalid AnyTLS URI host:port: %w", err)
+		}
+	}
+
+	params, _ := url.ParseQuery(queryStr)
+	allowInsecure := parseBoolishParam(params.Get("insecure")) || parseBoolishParam(params.Get("allow_insecure")) || parseBoolishParam(params.Get("allowInsecure"))
+
+	return &ShareLinkRequest{
+		Protocol:      "anytls",
+		Address:       address,
+		Port:          port,
+		Password:      password,
+		Remark:        remark,
+		Type:          "tcp",
+		TLS:           "tls",
+		AllowInsecure: allowInsecure,
+		SNI:           params.Get("sni"),
+	}, nil
+}
+
 // parseSSURI parses ss://base64(method:password)@host:port#remark
 func parseSSURI(uri string) (*ShareLinkRequest, error) {
 	body := uri[len("ss://"):]
@@ -437,6 +503,9 @@ func BuildOutboundJSON(req *ShareLinkRequest, tag string) (json.RawMessage, erro
 	case "hysteria", "hysteria2":
 		outbound["protocol"] = "hysteria"
 		outbound["settings"] = buildHysteriaProxySettings(req)
+	case "anytls":
+		outbound["protocol"] = "anytls"
+		outbound["settings"] = buildAnyTLSSettings(req)
 	default:
 		return nil, fmt.Errorf("unsupported protocol: %s", req.Protocol)
 	}
@@ -682,6 +751,18 @@ func buildStreamSettings(req *ShareLinkRequest) map[string]interface{} {
 	}
 
 	return stream
+}
+
+func buildAnyTLSSettings(req *ShareLinkRequest) map[string]interface{} {
+	port := req.Port
+	if port == 0 {
+		port = 443
+	}
+	return map[string]interface{}{
+		"address":  req.Address,
+		"port":     port,
+		"password": req.Password,
+	}
 }
 
 func parseSSUserInfo(userInfo string) (string, string, error) {

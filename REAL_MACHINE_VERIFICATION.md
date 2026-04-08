@@ -234,7 +234,7 @@ Pass condition:
 
 ## Protocol Support Snapshot
 
-Snapshot time: `2026-03-26 11:55 +08:00`
+Snapshot time: `2026-04-09 01:45 +08:00`
 
 This repo's top-level GitHub `README` is not a protocol support matrix. It does not
 spell out whether subscription share links like `tuic://`, `hysteria2://`, or
@@ -243,6 +243,11 @@ from the code and from real-machine probes.
 
 Code-level support in this worktree:
 
+- `anytls` client config exists in
+  [infra/conf/anytls.go](/home/leo-cy/Xray-core-laochendeai/infra/conf/anytls.go),
+  and the minimal outbound TCP relay path exists in
+  [outbound.go](/home/leo-cy/Xray-core-laochendeai/proxy/anytls/outbound.go) and
+  [client.go](/home/leo-cy/Xray-core-laochendeai/proxy/anytls/client.go).
 - `hysteria` client/server config exists in
   [infra/conf/hysteria.go](/home/leo-cy/Xray-core-laochendeai/infra/conf/hysteria.go)
   and the client path explicitly requires `version == 2`.
@@ -250,7 +255,7 @@ Code-level support in this worktree:
   [infra/conf/shadowsocks.go](/home/leo-cy/Xray-core-laochendeai/infra/conf/shadowsocks.go)
   and the underlying core package exists under
   [proxy/shadowsocks_2022](/home/leo-cy/Xray-core-laochendeai/proxy/shadowsocks_2022).
-- webpanel import/build support for `hysteria2://` and `ss://` 2022 methods exists in
+- webpanel import/build support for `anytls://`, `hysteria2://`, and `ss://` 2022 methods exists in
   [share_link_parser.go](/home/leo-cy/Xray-core-laochendeai/app/webpanel/share_link_parser.go),
   [share_link.go](/home/leo-cy/Xray-core-laochendeai/app/webpanel/share_link.go), and
   [outbound_config.go](/home/leo-cy/Xray-core-laochendeai/app/webpanel/outbound_config.go).
@@ -259,6 +264,10 @@ Code-level support in this worktree:
 
 Machine-level evidence on this Linux host:
 
+- local verification for the new AnyTLS slice passed on this host:
+  `go test ./proxy/anytls ./app/webpanel ./infra/conf -run AnyTLS`
+  returned `ok`, including a TLS-backed AnyTLS relay fixture in
+  [outbound_test.go](/home/leo-cy/Xray-core-laochendeai/proxy/anytls/outbound_test.go).
 - `GET /api/v1/tun/status` returned `running=false` and `machineState=clean`.
   Starting the webpanel service did not globally hijack other application traffic.
 - `GET /api/v1/node-pool` returned `activeCount=42`, `stagingCount=159`,
@@ -275,11 +284,67 @@ Machine-level evidence on this Linux host:
 
 Current interpretation:
 
+- `anytls` is now supported for the first outbound-only slice:
+  config build, WebPanel import/build/decode, and basic TCP relay are all wired in.
+- `anytls` is not yet a full protocol parity implementation:
+  no inbound path, no UDP, no session pool, and no padding-scheme updates yet.
 - `ss-2022` support is real, not just parser-level.
 - `hysteria2` import/build wiring is present, but the current supplied nodes are not
   yet validated as usable on this machine.
 - `ss + v2ray-plugin` import/build wiring is present, but the current supplied
   plugin nodes are not yet validated as usable on this machine.
+
+### AnyTLS Local Smoke (#53)
+
+Use this flow when you want a teammate-runnable local proof that the first AnyTLS
+slice works outside of unit tests.
+
+1. Start a local reference AnyTLS server:
+   ```bash
+   go run github.com/anytls/anytls-go/cmd/server@v0.0.12 \
+     -l 127.0.0.1:18443 \
+     -p test-pass
+   ```
+2. Import this share link through the WebPanel subscription/manual import flow:
+   ```text
+   anytls://test-pass@127.0.0.1:18443/?sni=127.0.0.1&insecure=1#anytls-local
+   ```
+3. Verify the generated outbound keeps AnyTLS settings at the protocol layer and TLS
+   at the stream layer. The effective shape should be equivalent to:
+   ```json
+   {
+     "protocol": "anytls",
+     "settings": {
+       "address": "127.0.0.1",
+       "port": 18443,
+       "password": "test-pass"
+     },
+     "streamSettings": {
+       "network": "tcp",
+       "security": "tls",
+       "tlsSettings": {
+         "serverName": "127.0.0.1",
+         "allowInsecure": true
+       }
+     }
+   }
+   ```
+4. Promote that imported node to active, then force a probe through it:
+   ```bash
+   ./scripts/probe-webpanel-outbound.sh --target pool_<node-id>
+   ```
+
+Pass condition:
+
+- the probe returns `curl exit: 0`
+- the local AnyTLS server logs an accepted TCP connection
+- WebPanel shows the imported node as `protocol=anytls`
+
+Expected current limits of this smoke:
+
+- only TCP is covered
+- this does not prove UDP or transparent-TUN specific behavior
+- this does not validate session reuse or padding-scheme updates
 
 ### Hysteria2 Root-Cause Notes
 

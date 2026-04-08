@@ -16,6 +16,7 @@ import (
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
 	core "github.com/xtls/xray-core/core"
+	anytls "github.com/xtls/xray-core/proxy/anytls"
 	blackhole "github.com/xtls/xray-core/proxy/blackhole"
 	freedom "github.com/xtls/xray-core/proxy/freedom"
 	hysteriaoutbound "github.com/xtls/xray-core/proxy/hysteria"
@@ -167,6 +168,12 @@ type standardHysteriaProxySettings struct {
 	Server  standardServerAddress `json:"server"`
 }
 
+type standardAnyTLSSettings struct {
+	Address  string `json:"address"`
+	Port     int    `json:"port"`
+	Password string `json:"password"`
+}
+
 type standardServerAddress struct {
 	Address string `json:"address"`
 	Port    int    `json:"port"`
@@ -282,6 +289,8 @@ func decodeStandardProxySettings(protocolName string, raw json.RawMessage) (prot
 		return buildStandardShadowsocksProxySettings(raw)
 	case "hysteria", "hysteria2":
 		return buildStandardHysteriaProxySettings(raw)
+	case "anytls":
+		return buildStandardAnyTLSProxySettings(raw)
 	default:
 		return nil, fmt.Errorf("unsupported standard outbound protocol: %s", protocolName)
 	}
@@ -427,6 +436,34 @@ func buildStandardHysteriaProxySettings(raw json.RawMessage) (proto.Message, err
 	return &hysteriaoutbound.ClientConfig{
 		Version: version,
 		Server:  buildServerEndpoint(address, port, nil),
+	}, nil
+}
+
+func buildStandardAnyTLSProxySettings(raw json.RawMessage) (proto.Message, error) {
+	var settings standardAnyTLSSettings
+	if !isEmptyRawJSON(raw) {
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return nil, fmt.Errorf("invalid anytls settings: %w", err)
+		}
+	}
+
+	address := strings.TrimSpace(settings.Address)
+	if address == "" {
+		return nil, fmt.Errorf("anytls server address is required")
+	}
+
+	port := settings.Port
+	if port == 0 {
+		port = 443
+	}
+	if port <= 0 || port > 65535 {
+		return nil, fmt.Errorf("anytls server port is invalid: %d", port)
+	}
+
+	return &anytls.Config{
+		Address:  address,
+		Port:     uint32(port),
+		Password: settings.Password,
 	}, nil
 }
 
