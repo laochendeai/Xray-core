@@ -3,6 +3,7 @@ package webpanel
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -178,6 +179,52 @@ func TestParseShareLinkURIParsesAnyTLS(t *testing.T) {
 	}
 	if defaultReq.Port != 443 {
 		t.Fatalf("expected default port 443, got %d", defaultReq.Port)
+	}
+
+	noSlashReq, err := ParseShareLinkURI(`anytls://hunter123@any.example.com:8443?alpn=h2&allowInsecure=1&sni=any.example.com#any`)
+	if err != nil {
+		t.Fatalf("ParseShareLinkURI returned error for no-slash anytls URI: %v", err)
+	}
+	if noSlashReq.ALPN != "h2" {
+		t.Fatalf("expected alpn h2, got %q", noSlashReq.ALPN)
+	}
+	if !noSlashReq.AllowInsecure {
+		t.Fatal("expected allow insecure to be true for no-slash anytls URI")
+	}
+}
+
+func TestGenerateShareLinkSupportsAnyTLS(t *testing.T) {
+	t.Parallel()
+
+	link, err := GenerateShareLink(ShareLinkRequest{
+		Protocol:      "anytls",
+		Address:       "45.221.98.14",
+		Port:          59901,
+		Password:      "dongtaiwang.com",
+		AllowInsecure: true,
+		SNI:           "45.221.98.14",
+		ALPN:          "h2",
+		Remark:        "US_21",
+	})
+	if err != nil {
+		t.Fatalf("GenerateShareLink returned error: %v", err)
+	}
+	if !strings.HasPrefix(link, "anytls://dongtaiwang.com@45.221.98.14:59901?") {
+		t.Fatalf("unexpected anytls link: %q", link)
+	}
+
+	req, err := ParseShareLinkURI(link)
+	if err != nil {
+		t.Fatalf("ParseShareLinkURI returned error for generated AnyTLS link: %v", err)
+	}
+	if req.Protocol != "anytls" {
+		t.Fatalf("expected anytls protocol, got %q", req.Protocol)
+	}
+	if req.ALPN != "h2" {
+		t.Fatalf("expected round-tripped alpn h2, got %q", req.ALPN)
+	}
+	if !req.AllowInsecure {
+		t.Fatal("expected round-tripped allow insecure to stay true")
 	}
 }
 
