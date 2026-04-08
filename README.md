@@ -15,6 +15,8 @@ The upstream project remains [Project X](https://github.com/XTLS). Upstream READ
 ## Documentation Map
 
 - [`web/README.md`](web/README.md): WebPanel pages, APIs, transparent-mode behavior, and development notes
+- [`REAL_MACHINE_VERIFICATION.md`](REAL_MACHINE_VERIFICATION.md): teammate-runnable real-machine verification flows for transparent TUN and fallback behavior
+- [`proxy/tun/README.md`](proxy/tun/README.md): low-level TUN networking constraints, OS routing ownership, and platform-specific prerequisites
 - [`README.md`](README.md): fork overview, build entry points, and repository workflow
 - [`scripts/check.sh`](scripts/check.sh): single local verification entry point before push
 
