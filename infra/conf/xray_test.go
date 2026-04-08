@@ -17,6 +17,7 @@ import (
 	"github.com/xtls/xray-core/common/serial"
 	core "github.com/xtls/xray-core/core"
 	. "github.com/xtls/xray-core/infra/conf"
+	"github.com/xtls/xray-core/proxy/anytls"
 	"github.com/xtls/xray-core/proxy/vmess"
 	"github.com/xtls/xray-core/proxy/vmess/inbound"
 	"github.com/xtls/xray-core/transport/internet"
@@ -196,6 +197,57 @@ func TestMuxConfig_Build(t *testing.T) {
 				t.Errorf("MuxConfig.Build() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAnyTLSOutboundConfigBuild(t *testing.T) {
+	t.Parallel()
+
+	config := new(Config)
+	if err := json.Unmarshal([]byte(`{
+		"outbounds": [{
+			"tag": "anytls-test",
+			"protocol": "anytls",
+			"settings": {
+				"address": "example.com",
+				"port": 443,
+				"password": "top-secret"
+			},
+			"streamSettings": {
+				"security": "tls"
+			}
+		}]
+	}`), config); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	built, err := config.Build()
+	if err != nil {
+		t.Fatalf("build config: %v", err)
+	}
+
+	coreConfig := built
+	if len(coreConfig.Outbound) != 1 {
+		t.Fatalf("expected 1 outbound, got %d", len(coreConfig.Outbound))
+	}
+
+	proxySettings, err := coreConfig.Outbound[0].ProxySettings.GetInstance()
+	if err != nil {
+		t.Fatalf("decode proxy settings: %v", err)
+	}
+
+	anyTLSConfig, ok := proxySettings.(*anytls.Config)
+	if !ok {
+		t.Fatalf("unexpected proxy settings type %T", proxySettings)
+	}
+	if anyTLSConfig.Address != "example.com" {
+		t.Fatalf("expected address %q, got %q", "example.com", anyTLSConfig.Address)
+	}
+	if anyTLSConfig.Port != 443 {
+		t.Fatalf("expected port %d, got %d", 443, anyTLSConfig.Port)
+	}
+	if anyTLSConfig.Password != "top-secret" {
+		t.Fatalf("expected password %q, got %q", "top-secret", anyTLSConfig.Password)
 	}
 }
 
