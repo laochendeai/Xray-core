@@ -85,6 +85,12 @@ Artifacts:
   - `egress-probe-cache.json`
   - route / rule / `resolvectl` captures
 
+How to read the IP fields reported by `baseline-summary.txt` and `baseline-summary.json`:
+
+- `direct_egress_ip` and `ipSemantics.directEgressIp*` are the machine's own direct public egress from `directEgress`. This should stay stable before and with TUN unless the real WAN egress actually changed.
+- `same_user_path_public_ip` and `sameUserPath*` come from the same user path calling an IP-echo endpoint. With TUN enabled this can become the proxy exit IP, which does not mean the machine's direct public egress changed.
+- `target_remote_ip` and `protectedTargetProbe.targetRemoteIp` are the remote address that `curl` connected to for the protected URL. This is usually the site origin or CDN edge IP, not your own public egress.
+
 The fallback rehearsal remains a separate, extended verification and is not part of this minimum baseline.
 
 ## Verification Scripts
