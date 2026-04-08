@@ -138,6 +138,7 @@ cleanup_tmp() {
   for file in "${TMP_FILES[@]:-}"; do
     [[ -n "$file" && -f "$file" ]] && rm -f "$file"
   done
+  return 0
 }
 
 api_get_checked() {
@@ -553,19 +554,45 @@ proxy_probe = load_json(proxy_probe_path)
 quic_probe = load_json(quic_probe_path)
 runtime_checks = load_json(runtime_checks_path)
 
+def annotate_same_user_path_probe(payload):
+    annotated = dict(payload)
+    annotated["publicIp"] = payload.get("responseBody")
+    annotated["ipEchoEndpoint"] = payload.get("effectiveUrl") or payload.get("url")
+    return annotated
+
+def annotate_protected_target_probe(payload):
+    annotated = dict(payload)
+    annotated["targetRemoteIp"] = payload.get("remoteIp")
+    return annotated
+
+same_user_path_before_tun = annotate_same_user_path_probe(public_ip_before)
+same_user_path_with_tun = annotate_same_user_path_probe(public_ip_running)
+protected_target_probe = annotate_protected_target_probe(protected_probe)
+before_direct = before.get("directEgress") or {}
+running_direct = running.get("directEgress") or {}
+running_proxy = running.get("proxyEgress") or {}
+
 summary = {
     "before": before,
     "running": running,
     "restored": restored,
-    "publicIpBefore": public_ip_before,
-    "publicIpRunning": public_ip_running,
-    "protectedProbe": protected_probe,
+    "sameUserPathBeforeTun": same_user_path_before_tun,
+    "sameUserPathWithTun": same_user_path_with_tun,
+    "protectedTargetProbe": protected_target_probe,
     "proxyProbe": proxy_probe,
     "quicProbe": quic_probe,
     "runtimeChecks": runtime_checks,
     "protectedUrl": protected_url,
     "proxyTarget": proxy_target,
     "proxyProbeUrl": proxy_probe_url,
+    "ipSemantics": {
+        "directEgressIpBeforeTun": before_direct.get("ip"),
+        "directEgressIpWithTun": running_direct.get("ip"),
+        "sameUserPathPublicIpBeforeTun": same_user_path_before_tun.get("publicIp"),
+        "sameUserPathPublicIpWithTun": same_user_path_with_tun.get("publicIp"),
+        "sameUserPathIpEchoEndpoint": same_user_path_with_tun.get("ipEchoEndpoint"),
+        "protectedTargetRemoteIp": protected_target_probe.get("targetRemoteIp"),
+    },
     "snapshots": {
         "before": snapshot_before,
         "running": snapshot_running,
@@ -574,9 +601,6 @@ summary = {
 }
 Path(summary_json_path).write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-before_direct = before.get("directEgress") or {}
-running_direct = running.get("directEgress") or {}
-running_proxy = running.get("proxyEgress") or {}
 default_proxy_diag = "-"
 for item in running.get("routingDiagnostics") or []:
     if item.get("category") == "default_proxy_domains":
@@ -584,11 +608,11 @@ for item in running.get("routingDiagnostics") or []:
         break
 
 lines = [
-    f"SUMMARY before running={before.get('running')} machineState={before.get('machineState')} direct={before_direct.get('status')} direct_ip={before_direct.get('ip', '-')}",
-    f"SUMMARY running running={running.get('running')} machineState={running.get('machineState')} direct={running_direct.get('status')} direct_ip={running_direct.get('ip', '-')} proxy={running_proxy.get('status')}",
-    f"SUMMARY public_ip before={public_ip_before.get('responseBody', '-')} during={public_ip_running.get('responseBody', '-')} endpoint={public_ip_running.get('effectiveUrl', public_ip_running.get('url', '-'))}",
+    f"SUMMARY before running={before.get('running')} machineState={before.get('machineState')} direct={before_direct.get('status')} direct_egress_ip={before_direct.get('ip', '-')}",
+    f"SUMMARY running running={running.get('running')} machineState={running.get('machineState')} direct={running_direct.get('status')} direct_egress_ip={running_direct.get('ip', '-')} proxy_path={running_proxy.get('status')}",
+    f"SUMMARY same_user_path_public_ip before_tun={same_user_path_before_tun.get('publicIp', '-')} with_tun={same_user_path_with_tun.get('publicIp', '-')} ip_echo_endpoint={same_user_path_with_tun.get('ipEchoEndpoint', '-')}",
     f"SUMMARY routing runtime_passed={runtime_checks.get('passed')} default_proxy_diag={default_proxy_diag}",
-    f"SUMMARY protected url={protected_url} exit={protected_probe.get('exitCode')} http_code={protected_probe.get('httpCode')} remote_ip={protected_probe.get('remoteIp', '-')}",
+    f"SUMMARY protected_target url={protected_url} exit={protected_target_probe.get('exitCode')} http_code={protected_target_probe.get('httpCode')} target_remote_ip={protected_target_probe.get('targetRemoteIp', '-')}",
     f"SUMMARY proxy_probe target={proxy_target} exit={proxy_probe.get('exitCode')} passed={proxy_probe.get('proxyProbePassed', proxy_probe.get('exitCode') == 0)} probe_url={proxy_probe_url}",
     f"SUMMARY quic supported={quic_probe.get('http3Supported')} http3_passed={quic_probe.get('http3Passed')} prerequisites_passed={quic_probe.get('prerequisitesPassed')}",
     f"SUMMARY restored running={restored.get('running')} machineState={restored.get('machineState')} reason={restored.get('lastStateReason')}",
