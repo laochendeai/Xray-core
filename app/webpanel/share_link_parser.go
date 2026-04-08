@@ -326,6 +326,7 @@ func parseAnyTLSURI(uri string) (*ShareLinkRequest, error) {
 		TLS:           "tls",
 		AllowInsecure: allowInsecure,
 		SNI:           params.Get("sni"),
+		ALPN:          params.Get("alpn"),
 	}, nil
 }
 

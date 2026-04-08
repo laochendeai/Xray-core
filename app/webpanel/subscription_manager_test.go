@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -636,6 +637,55 @@ func TestSubscriptionManagerAddManualSubscriptionStoresSanitizedContent(t *testi
 	}
 	if listed[0].Content != "" {
 		t.Fatal("expected listed subscription content to be redacted")
+	}
+}
+
+func TestSubscriptionManagerAddManualSubscriptionImportsAnyTLS(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	sm := NewSubscriptionManager(configPath, nil, nil, nil)
+	defer sm.Stop()
+
+	content := strings.Join([]string{
+		"anytls://dongtaiwang.com@45.221.98.14:59901?security=none&type=tcp&allowInsecure=1&insecure=1#US_17",
+		"anytls://dongtaiwang.com@45.221.98.14:59901?security=none&type=tcp&alpn=h2&allowInsecure=1&sni=45.221.98.14&insecure=1#US_21",
+	}, "\n")
+
+	sub, err := sm.AddSubscription(SubscriptionInput{
+		SourceType: SubscriptionSourceManual,
+		Content:    content,
+		Remark:     "manual anytls import",
+	})
+	if err != nil {
+		t.Fatalf("add manual anytls subscription: %v", err)
+	}
+	if sub.SourceType != SubscriptionSourceManual {
+		t.Fatalf("expected manual source type, got %q", sub.SourceType)
+	}
+
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	if len(sm.state.Nodes) != 2 {
+		t.Fatalf("expected 2 imported anytls nodes, got %d", len(sm.state.Nodes))
+	}
+
+	foundALPN := false
+	for _, node := range sm.state.Nodes {
+		if node.Protocol != "anytls" {
+			t.Fatalf("expected anytls protocol, got %q", node.Protocol)
+		}
+		if !strings.HasPrefix(node.URI, "anytls://dongtaiwang.com@45.221.98.14:59901") {
+			t.Fatalf("unexpected canonical anytls uri: %q", node.URI)
+		}
+		if strings.Contains(node.URI, "alpn=h2") {
+			foundALPN = true
+		}
+	}
+	if !foundALPN {
+		t.Fatal("expected one canonical AnyTLS URI to preserve alpn=h2")
 	}
 }
 

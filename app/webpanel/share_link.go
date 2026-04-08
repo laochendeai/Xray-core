@@ -52,6 +52,8 @@ func GenerateShareLink(req ShareLinkRequest) (string, error) {
 		return generateSSLink(req)
 	case "hysteria", "hysteria2":
 		return generateHysteria2Link(req)
+	case "anytls":
+		return generateAnyTLSLink(req)
 	default:
 		return "", fmt.Errorf("unsupported protocol: %s", req.Protocol)
 	}
@@ -293,6 +295,45 @@ func generateHysteria2Link(req ShareLinkRequest) (string, error) {
 	}
 
 	return fmt.Sprintf("hysteria2://%s@%s:%d#%s",
+		url.PathEscape(req.Password), req.Address, req.Port,
+		url.PathEscape(remark),
+	), nil
+}
+
+func generateAnyTLSLink(req ShareLinkRequest) (string, error) {
+	if req.Password == "" || req.Address == "" || req.Port == 0 {
+		return "", fmt.Errorf("password, address, and port are required for AnyTLS")
+	}
+
+	params := url.Values{}
+	if req.SNI != "" {
+		params.Set("sni", req.SNI)
+	}
+	if req.ALPN != "" {
+		params.Set("alpn", req.ALPN)
+	}
+	if req.AllowInsecure {
+		params.Set("insecure", "1")
+	}
+	for k, v := range req.Extra {
+		params.Set(k, v)
+	}
+
+	remark := req.Remark
+	if remark == "" {
+		remark = req.Email
+	}
+
+	query := params.Encode()
+	if query != "" {
+		return fmt.Sprintf("anytls://%s@%s:%d?%s#%s",
+			url.PathEscape(req.Password), req.Address, req.Port,
+			query,
+			url.PathEscape(remark),
+		), nil
+	}
+
+	return fmt.Sprintf("anytls://%s@%s:%d#%s",
 		url.PathEscape(req.Password), req.Address, req.Port,
 		url.PathEscape(remark),
 	), nil
