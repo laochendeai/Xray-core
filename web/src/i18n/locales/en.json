@@ -492,6 +492,20 @@
     "aggregationStatusTitle": "Experimental UDP/QUIC aggregation status",
     "aggregationStatusSummary": "Status: {status}. Requested path: {requested}. Effective path: {effective}. Reason: {reason}",
     "aggregationDisabledSummary": "Experimental UDP/QUIC aggregation is disabled, so transparent mode stays on the stable single-path balancer.",
+    "aggregationPrototypeTitle": "Local Scheduler Prototype",
+    "aggregationPrototypeSummary": "Candidates: {candidates}. Selected: {selected}. Sessions: {sessions}. TTL: {ttl}s. Metrics: {source}.",
+    "aggregationPrototypePathsTitle": "Path Snapshots",
+    "aggregationPrototypeSessionsTitle": "Preview Sessions",
+    "aggregationPrototypePathMetrics": "Latency {latency}. Loss {loss}. Score {score}. Last checked {checked}.",
+    "aggregationPrototypeSessionSummary": "Selected: {selected}. Candidates: {candidates}. Expires: {expires}.",
+    "aggregationPrototypeMetricSource": {
+      "node_pool_probe_history": "Node-pool probe history"
+    },
+    "aggregationPrototypePathState": {
+      "selected": "Selected",
+      "standby": "Standby",
+      "excluded": "Excluded"
+    },
     "aggregationEnabled": "Enable experimental UDP/QUIC aggregation",
     "aggregationMode": "Experimental aggregation mode",
     "aggregationModeOptions": {

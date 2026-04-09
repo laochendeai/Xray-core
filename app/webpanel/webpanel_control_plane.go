@@ -221,6 +221,7 @@ func (wp *WebPanel) appendTunStableDiagnostics(status *TunStatus, blocked bool) 
 	}
 
 	wp.appendTunRoutingDiagnostics(status)
+	wp.appendTunAggregationPrototype(status)
 
 	_, summary := wp.eligibleTransparentNodes()
 	appendUniqueTunDiagnostic(status, tunStableModeDiagnostic)
@@ -252,6 +253,21 @@ func (wp *WebPanel) appendTunStableDiagnostics(status *TunStatus, blocked bool) 
 	}
 
 	return status
+}
+
+func (wp *WebPanel) appendTunAggregationPrototype(status *TunStatus) {
+	if status == nil || wp.tunManager == nil || status.Aggregation == nil {
+		return
+	}
+
+	settings, err := wp.tunManager.SettingsSnapshot()
+	if err != nil {
+		appendUniqueTunDiagnostic(status, "Unable to build aggregation prototype diagnostics: "+err.Error())
+		return
+	}
+
+	attachTunAggregationPrototype(status.Aggregation, settings, wp.activePoolNodes(), time.Now())
+	appendUniqueTunDiagnostic(status, formatTunAggregationPrototypeDiagnostic(status.Aggregation.Prototype))
 }
 
 func (wp *WebPanel) appendTunRoutingDiagnostics(status *TunStatus) {

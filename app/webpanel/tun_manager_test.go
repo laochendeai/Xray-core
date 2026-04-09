@@ -2009,8 +2009,11 @@ func TestTunManagerStartWritesAggregationRuntimeState(t *testing.T) {
 	}
 
 	status := tunManager.Start([]NodeRecord{{
-		ID:  "node-1",
-		URI: mustGenerateTunTestURI(t, "203.0.113.44"),
+		ID:            "node-1",
+		URI:           mustGenerateTunTestURI(t, "203.0.113.44"),
+		AvgDelayMs:    28,
+		TotalPings:    10,
+		LastCheckedAt: func() *time.Time { now := time.Now(); return &now }(),
 	}})
 	if status == nil {
 		t.Fatal("expected tun start status")
@@ -2034,6 +2037,15 @@ func TestTunManagerStartWritesAggregationRuntimeState(t *testing.T) {
 	}
 	if runtimeState.EffectivePath != string(TunAggregationPathStableSinglePath) {
 		t.Fatalf("expected stable effective path, got %#v", runtimeState)
+	}
+	if runtimeState.Prototype == nil {
+		t.Fatalf("expected local aggregation prototype in runtime state, got %#v", runtimeState)
+	}
+	if runtimeState.Prototype.SelectedPathCount != 1 {
+		t.Fatalf("expected one selected prototype path, got %#v", runtimeState.Prototype)
+	}
+	if runtimeState.Prototype.SessionCount != 1 {
+		t.Fatalf("expected one prototype session, got %#v", runtimeState.Prototype)
 	}
 }
 

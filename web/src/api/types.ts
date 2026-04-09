@@ -319,6 +319,48 @@ export interface TunAggregationSettings {
   health: TunAggregationHealthSettings
 }
 
+export type TunAggregationPrototypePathState = 'selected' | 'standby' | 'excluded'
+
+export interface TunAggregationPrototypePath {
+  nodeId: string
+  remark?: string
+  outboundTag: string
+  state: TunAggregationPrototypePathState
+  eligible: boolean
+  selected: boolean
+  score: number
+  latencyMs: number
+  lossPct: number
+  consecutiveFails: number
+  lastCheckedAt?: string
+  reason: string
+}
+
+export interface TunAggregationPrototypeSession {
+  sessionId: string
+  state: string
+  flow: string
+  schedulerPolicy: TunAggregationSchedulerPolicy
+  candidatePathIds?: string[]
+  selectedPathIds?: string[]
+  createdAt: string
+  lastSeenAt: string
+  expiresAt: string
+  reason: string
+}
+
+export interface TunAggregationPrototypeStatus {
+  ready: boolean
+  metricSource: string
+  sessionTtlSeconds: number
+  candidatePathCount: number
+  selectedPathCount: number
+  sessionCount: number
+  paths: TunAggregationPrototypePath[]
+  sessions: TunAggregationPrototypeSession[]
+  note?: string
+}
+
 export interface TunAggregationStatus {
   enabled: boolean
   status: TunAggregationStatusCode
@@ -331,6 +373,7 @@ export interface TunAggregationStatus {
   schedulerPolicy: TunAggregationSchedulerPolicy
   relayEndpoint?: string
   reason: string
+  prototype?: TunAggregationPrototypeStatus
 }
 
 export interface TunStatusResponse {
