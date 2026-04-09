@@ -205,6 +205,11 @@ type NodeRecord struct {
 	LastCheckedAt       *time.Time        `json:"lastCheckedAt,omitempty"`
 	Cleanliness         CleanlinessStatus `json:"cleanliness"`
 	BandwidthTier       BandwidthTier     `json:"bandwidthTier"`
+	ExitIPStatus        NodeExitIPStatus  `json:"exitIpStatus"`
+	ExitIP              string            `json:"exitIp,omitempty"`
+	ExitIPSource        string            `json:"exitIpSource,omitempty"`
+	ExitIPError         string            `json:"exitIpError,omitempty"`
+	ExitIPCheckedAt     *time.Time        `json:"exitIpCheckedAt,omitempty"`
 }
 
 // ValidationConfig holds the criteria for promoting/quarantining nodes.
@@ -237,6 +242,11 @@ type SubscriptionManager struct {
 	bgWG                sync.WaitGroup
 	started             bool
 	dispatcherAvailable bool
+	dispatcher          routing.Dispatcher
+	nodeExitIPProber    nodeExitIPProbeFunc
+	nodeExitIPProbeTTL  time.Duration
+	nodeExitIPErrorTTL  time.Duration
+	nodeExitIPInFlight  map[string]struct{}
 }
 
 const (
@@ -246,6 +256,8 @@ const (
 	legacyDemotedStatus    = "demoted"
 	legacyStagingTagPrefix = "staging_"
 	legacyActiveTagPrefix  = "active_"
+	nodeExitIPProbeTTL     = 6 * time.Hour
+	nodeExitIPErrorTTL     = 15 * time.Minute
 )
 
 // NewSubscriptionManager creates a new SubscriptionManager.
@@ -253,13 +265,17 @@ func NewSubscriptionManager(configPath string, grpcClient *GRPCClient, instance 
 	statePath := filepath.Join(filepath.Dir(configPath), "node_pool_state.json")
 
 	sm := &SubscriptionManager{
-		statePath:  statePath,
-		grpcClient: grpcClient,
-		instance:   instance,
-		runtimeCtx: runtimeCtx,
-		stopCh:     make(chan struct{}),
-		saveCh:     make(chan struct{}, 1),
-		saveDelay:  scheduledPersistDelay,
+		statePath:          statePath,
+		grpcClient:         grpcClient,
+		instance:           instance,
+		runtimeCtx:         runtimeCtx,
+		stopCh:             make(chan struct{}),
+		saveCh:             make(chan struct{}, 1),
+		saveDelay:          scheduledPersistDelay,
+		nodeExitIPProber:   defaultNodeExitIPProber,
+		nodeExitIPProbeTTL: nodeExitIPProbeTTL,
+		nodeExitIPErrorTTL: nodeExitIPErrorTTL,
+		nodeExitIPInFlight: make(map[string]struct{}),
 	}
 
 	state, changed := sm.loadState()
@@ -298,6 +314,7 @@ func (sm *SubscriptionManager) Start() error {
 	}
 	sm.started = true
 	sm.dispatcherAvailable = dispatcher != nil
+	sm.dispatcher = dispatcher
 	sm.mu.Unlock()
 
 	if normalized {
@@ -319,6 +336,13 @@ func (sm *SubscriptionManager) Start() error {
 		}
 		sm.prober.Start()
 	}
+
+	sm.mu.Lock()
+	now := time.Now()
+	for idx := range sm.state.Nodes {
+		sm.maybeScheduleNodeExitIPProbeLocked(idx, now)
+	}
+	sm.mu.Unlock()
 
 	sm.bgWG.Add(1)
 	go func() {
@@ -345,6 +369,7 @@ func (sm *SubscriptionManager) Stop() {
 	sm.mu.Lock()
 	sm.started = false
 	sm.dispatcherAvailable = false
+	sm.dispatcher = nil
 	sm.mu.Unlock()
 	if sm.prober != nil {
 		sm.prober.Stop()
@@ -1205,6 +1230,10 @@ func (sm *SubscriptionManager) handleProbeResults(results []ProbeResult) {
 				sm.applyTransitionLocked(idx, NodeStatusActive, TransitionReasonProbeRequalified, EventActorSystem, "quarantined node re-qualified")
 			}
 		}
+
+		if result.Success {
+			sm.maybeScheduleNodeExitIPProbeLocked(idx, now)
+		}
 	}
 
 	if changed {
@@ -1350,7 +1379,130 @@ func (sm *SubscriptionManager) ensureProbeableLocked(node *NodeRecord) error {
 	if sm.prober != nil {
 		sm.prober.AddTag(node.OutboundTag)
 	}
+	if idx := sm.findNodeByTag(node.OutboundTag); idx >= 0 {
+		sm.maybeScheduleNodeExitIPProbeLocked(idx, time.Now())
+	}
 	return nil
+}
+
+func (sm *SubscriptionManager) maybeScheduleNodeExitIPProbeLocked(idx int, now time.Time) {
+	if idx < 0 || idx >= len(sm.state.Nodes) || sm.dispatcher == nil || sm.nodeExitIPProber == nil {
+		return
+	}
+
+	node := sm.state.Nodes[idx]
+	if !isProbeableStatus(node.Status) || node.OutboundTag == "" {
+		return
+	}
+	if _, ok := sm.nodeExitIPInFlight[node.OutboundTag]; ok {
+		return
+	}
+
+	switch node.ExitIPStatus {
+	case NodeExitIPStatusAvailable:
+		if node.ExitIPCheckedAt != nil && now.Sub(*node.ExitIPCheckedAt) < sm.nodeExitIPProbeTTL {
+			return
+		}
+	case NodeExitIPStatusError:
+		if node.ExitIPCheckedAt != nil && now.Sub(*node.ExitIPCheckedAt) < sm.nodeExitIPErrorTTL {
+			return
+		}
+	}
+
+	sm.nodeExitIPInFlight[node.OutboundTag] = struct{}{}
+	tag := node.OutboundTag
+	sm.bgWG.Add(1)
+	go func() {
+		defer sm.bgWG.Done()
+		sm.runNodeExitIPProbe(tag)
+	}()
+}
+
+func (sm *SubscriptionManager) runNodeExitIPProbe(tag string) {
+	if strings.TrimSpace(tag) == "" {
+		return
+	}
+
+	probeCtx := context.Background()
+	if sm.runtimeCtx != nil && core.FromContext(sm.runtimeCtx) != nil {
+		probeCtx = core.ToBackgroundDetachedContext(sm.runtimeCtx)
+	}
+
+	sm.mu.RLock()
+	dispatcher := sm.dispatcher
+	prober := sm.nodeExitIPProber
+	sm.mu.RUnlock()
+
+	result := nodeExitIPProbeResult{
+		CheckedAt: time.Now().UTC(),
+		Error:     "node exit-IP prober is unavailable",
+	}
+	if dispatcher != nil && prober != nil {
+		result = prober(probeCtx, dispatcher, tag)
+		if result.CheckedAt.IsZero() {
+			result.CheckedAt = time.Now().UTC()
+		}
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	delete(sm.nodeExitIPInFlight, tag)
+
+	idx := sm.findNodeByTag(tag)
+	if idx < 0 {
+		return
+	}
+	if applyNodeExitIPProbeResult(&sm.state.Nodes[idx], result) {
+		sm.requestScheduledSave()
+	}
+}
+
+func applyNodeExitIPProbeResult(node *NodeRecord, result nodeExitIPProbeResult) bool {
+	if node == nil {
+		return false
+	}
+
+	changed := false
+	checkedAt := result.CheckedAt
+	if checkedAt.IsZero() {
+		checkedAt = time.Now().UTC()
+	}
+	if node.ExitIPCheckedAt == nil || !node.ExitIPCheckedAt.Equal(checkedAt) {
+		node.ExitIPCheckedAt = &checkedAt
+		changed = true
+	}
+
+	if result.IP != "" && node.ExitIP != result.IP {
+		node.ExitIP = result.IP
+		changed = true
+	}
+	if node.ExitIPSource != result.Source {
+		node.ExitIPSource = result.Source
+		changed = true
+	}
+
+	if result.Error == "" {
+		if node.ExitIPStatus != NodeExitIPStatusAvailable {
+			node.ExitIPStatus = NodeExitIPStatusAvailable
+			changed = true
+		}
+		if node.ExitIPError != "" {
+			node.ExitIPError = ""
+			changed = true
+		}
+		return changed
+	}
+
+	if node.ExitIPStatus != NodeExitIPStatusError {
+		node.ExitIPStatus = NodeExitIPStatusError
+		changed = true
+	}
+	if node.ExitIPError != result.Error {
+		node.ExitIPError = result.Error
+		changed = true
+	}
+	return changed
 }
 
 func (sm *SubscriptionManager) removeProbeableLocked(node *NodeRecord) {
@@ -1832,6 +1984,10 @@ func normalizeNodeRecord(node *NodeRecord, now time.Time) bool {
 
 	if node.Cleanliness == "" {
 		node.Cleanliness = CleanlinessUnknown
+		changed = true
+	}
+	if node.ExitIPStatus == "" {
+		node.ExitIPStatus = NodeExitIPStatusUnknown
 		changed = true
 	}
 	if node.BandwidthTier == "" {

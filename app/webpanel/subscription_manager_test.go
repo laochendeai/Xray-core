@@ -12,12 +12,40 @@ import (
 	"time"
 
 	handlerservice "github.com/xtls/xray-core/app/proxyman/command"
+	xnet "github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/features/routing"
+	"github.com/xtls/xray-core/transport"
 	"google.golang.org/grpc"
 )
 
 type stubHandlerServiceClient struct {
 	addedTags   []string
 	removedTags []string
+}
+
+type stubRoutingDispatcher struct{}
+
+func (s *stubRoutingDispatcher) Type() interface{} { return routing.DispatcherType() }
+func (s *stubRoutingDispatcher) Start() error      { return nil }
+func (s *stubRoutingDispatcher) Close() error      { return nil }
+func (s *stubRoutingDispatcher) Dispatch(context.Context, xnet.Destination) (*transport.Link, error) {
+	return nil, nil
+}
+func (s *stubRoutingDispatcher) DispatchLink(context.Context, xnet.Destination, *transport.Link) error {
+	return nil
+}
+
+func waitFor(t *testing.T, timeout time.Duration, condition func() bool, description string) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", description)
 }
 
 func (s *stubHandlerServiceClient) AddInbound(context.Context, *handlerservice.AddInboundRequest, ...grpc.CallOption) (*handlerservice.AddInboundResponse, error) {
@@ -211,6 +239,176 @@ func TestSubscriptionManagerHandleProbeResultsUpdatesLifecycle(t *testing.T) {
 	if summary.QuarantineCount != 1 {
 		t.Fatalf("expected 1 quarantined node in summary, got %d", summary.QuarantineCount)
 	}
+}
+
+func TestSubscriptionManagerHandleProbeResultsStoresNodeExitIP(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	statePath := filepath.Join(tempDir, "node_pool_state.json")
+	sm := NewSubscriptionManager(configPath, nil, nil, nil)
+	sm.saveDelay = 5 * time.Millisecond
+	sm.dispatcher = &stubRoutingDispatcher{}
+	sm.nodeExitIPProber = func(context.Context, routing.Dispatcher, string) nodeExitIPProbeResult {
+		return nodeExitIPProbeResult{
+			IP:        "203.0.113.44",
+			Source:    "https://api.ipify.org",
+			CheckedAt: time.Now().UTC(),
+		}
+	}
+	defer sm.Stop()
+
+	sm.mu.Lock()
+	sm.state.Nodes = []NodeRecord{
+		{
+			ID:               "node-exit-ip-success",
+			URI:              "vmess://example",
+			Remark:           "probeable",
+			Status:           NodeStatusActive,
+			StatusReason:     TransitionReasonManualPromote,
+			SubscriptionID:   "sub-1",
+			AddedAt:          time.Now().Add(-time.Minute),
+			OutboundTag:      probeOutboundTag("node-exit-ip-success"),
+			Cleanliness:      CleanlinessUnknown,
+			BandwidthTier:    BandwidthTierUnknown,
+			ExitIPStatus:     NodeExitIPStatusUnknown,
+			TotalPings:       4,
+			FailedPings:      0,
+			AvgDelayMs:       120,
+			ConsecutiveFails: 0,
+		},
+	}
+	sm.mu.Unlock()
+
+	sm.handleProbeResults([]ProbeResult{{
+		Tag:     probeOutboundTag("node-exit-ip-success"),
+		Success: true,
+		DelayMs: 88,
+	}})
+
+	waitFor(t, time.Second, func() bool {
+		nodes := sm.ListNodes("")
+		return len(nodes) == 1 && nodes[0].ExitIPStatus == NodeExitIPStatusAvailable && nodes[0].ExitIP == "203.0.113.44"
+	}, "node exit IP probe success")
+
+	sm.mu.Lock()
+	sm.writeStateLocked()
+	sm.mu.Unlock()
+
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+	var persisted NodePoolState
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("decode persisted state: %v", err)
+	}
+	if len(persisted.Nodes) != 1 || persisted.Nodes[0].ExitIP != "203.0.113.44" || persisted.Nodes[0].ExitIPStatus != NodeExitIPStatusAvailable {
+		t.Fatalf("unexpected persisted exit IP state: %#v", persisted.Nodes)
+	}
+}
+
+func TestSubscriptionManagerHandleProbeResultsCachesFreshNodeExitIP(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	sm := NewSubscriptionManager(configPath, nil, nil, nil)
+	sm.saveDelay = 5 * time.Millisecond
+	sm.dispatcher = &stubRoutingDispatcher{}
+	sm.nodeExitIPProbeTTL = time.Hour
+
+	callCount := 0
+	sm.nodeExitIPProber = func(context.Context, routing.Dispatcher, string) nodeExitIPProbeResult {
+		callCount++
+		return nodeExitIPProbeResult{
+			IP:        "203.0.113.45",
+			Source:    "https://api.ipify.org",
+			CheckedAt: time.Now().UTC(),
+		}
+	}
+	defer sm.Stop()
+
+	checkedAt := time.Now().Add(-5 * time.Minute).UTC()
+	sm.mu.Lock()
+	sm.state.Nodes = []NodeRecord{
+		{
+			ID:              "node-exit-ip-cache",
+			URI:             "vmess://example",
+			Remark:          "fresh-cache",
+			Status:          NodeStatusActive,
+			StatusReason:    TransitionReasonManualPromote,
+			SubscriptionID:  "sub-1",
+			AddedAt:         time.Now().Add(-time.Minute),
+			OutboundTag:     probeOutboundTag("node-exit-ip-cache"),
+			Cleanliness:     CleanlinessUnknown,
+			BandwidthTier:   BandwidthTierUnknown,
+			ExitIPStatus:    NodeExitIPStatusAvailable,
+			ExitIP:          "203.0.113.45",
+			ExitIPSource:    "https://api.ipify.org",
+			ExitIPCheckedAt: &checkedAt,
+		},
+	}
+	sm.mu.Unlock()
+
+	sm.handleProbeResults([]ProbeResult{{
+		Tag:     probeOutboundTag("node-exit-ip-cache"),
+		Success: true,
+		DelayMs: 52,
+	}})
+
+	time.Sleep(100 * time.Millisecond)
+	if callCount != 0 {
+		t.Fatalf("expected no exit-IP reprobe for fresh cache, got %d calls", callCount)
+	}
+}
+
+func TestSubscriptionManagerHandleProbeResultsStoresNodeExitIPError(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	sm := NewSubscriptionManager(configPath, nil, nil, nil)
+	sm.saveDelay = 5 * time.Millisecond
+	sm.dispatcher = &stubRoutingDispatcher{}
+	sm.nodeExitIPProber = func(context.Context, routing.Dispatcher, string) nodeExitIPProbeResult {
+		return nodeExitIPProbeResult{
+			Source:    "https://api.ipify.org",
+			CheckedAt: time.Now().UTC(),
+			Error:     "probe timeout",
+		}
+	}
+	defer sm.Stop()
+
+	sm.mu.Lock()
+	sm.state.Nodes = []NodeRecord{
+		{
+			ID:             "node-exit-ip-error",
+			URI:            "vmess://example",
+			Remark:         "probe-error",
+			Status:         NodeStatusStaging,
+			StatusReason:   TransitionReasonSubscriptionNodeDiscovered,
+			SubscriptionID: "sub-1",
+			AddedAt:        time.Now().Add(-time.Minute),
+			OutboundTag:    probeOutboundTag("node-exit-ip-error"),
+			Cleanliness:    CleanlinessUnknown,
+			BandwidthTier:  BandwidthTierUnknown,
+			ExitIPStatus:   NodeExitIPStatusUnknown,
+		},
+	}
+	sm.mu.Unlock()
+
+	sm.handleProbeResults([]ProbeResult{{
+		Tag:     probeOutboundTag("node-exit-ip-error"),
+		Success: true,
+		DelayMs: 44,
+	}})
+
+	waitFor(t, time.Second, func() bool {
+		nodes := sm.ListNodes("")
+		return len(nodes) == 1 && nodes[0].ExitIPStatus == NodeExitIPStatusError && nodes[0].ExitIPError == "probe timeout"
+	}, "node exit IP probe error")
 }
 
 func TestSubscriptionManagerDoesNotRequalifyQuarantineNodeOnFailedProbe(t *testing.T) {
