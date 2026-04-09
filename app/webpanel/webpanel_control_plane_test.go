@@ -440,6 +440,7 @@ func TestTunStatusSnapshotIncludesAggregationPrototype(t *testing.T) {
 		"mode":               "single_best",
 		"maxPathsPerSession": 2,
 		"schedulerPolicy":    "single_best",
+		"relayEndpoint":      "https://relay.example/ingress",
 	}
 	updatedRaw, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -459,10 +460,22 @@ func TestTunStatusSnapshotIncludesAggregationPrototype(t *testing.T) {
 	if status.Aggregation.Prototype.SelectedPathCount != 1 {
 		t.Fatalf("expected one selected path, got %#v", status.Aggregation.Prototype)
 	}
+	if status.Aggregation.Relay == nil || !status.Aggregation.Relay.Ready {
+		t.Fatalf("expected aggregation relay preview in status snapshot, got %#v", status.Aggregation)
+	}
+	if status.Aggregation.Benchmark == nil || !status.Aggregation.Benchmark.Ready {
+		t.Fatalf("expected aggregation benchmark preview in status snapshot, got %#v", status.Aggregation)
+	}
 
 	diagnostics := strings.Join(status.Diagnostics, "\n")
 	if !strings.Contains(diagnostics, "Aggregation prototype: candidates=1 selected=1 sessions=1") {
 		t.Fatalf("expected prototype diagnostic in status output\n%s", diagnostics)
+	}
+	if !strings.Contains(diagnostics, "Aggregation relay prototype: sessions=1") {
+		t.Fatalf("expected relay diagnostic in status output\n%s", diagnostics)
+	}
+	if !strings.Contains(diagnostics, "Aggregation benchmark [degraded_primary]") {
+		t.Fatalf("expected benchmark diagnostic in status output\n%s", diagnostics)
 	}
 }
 

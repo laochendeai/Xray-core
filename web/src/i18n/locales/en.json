@@ -506,6 +506,21 @@
       "standby": "Standby",
       "excluded": "Excluded"
     },
+    "aggregationRelayTitle": "Relay Prototype",
+    "aggregationRelaySummary": "Contract: {version}. Endpoint: {endpoint}. Sessions: {sessions}. Delivered: {delivered}/{packets}. Duplicates: {duplicates}. Reordered: {reordered}. Max buffer: {buffer}.",
+    "aggregationRelaySessionsTitle": "Relay Session Preview",
+    "aggregationRelaySessionSummary": "Paths: {paths}. Delivered {delivered}/{packets}. Startup {startup}. Stalls {stalls}. Goodput {goodput}. Duplicates {duplicates}. Reordered {reordered}. Buffer {buffer}.",
+    "aggregationBenchmarkTitle": "Synthetic Benchmark Harness",
+    "aggregationBenchmarkSummary": "Scenarios: {scenarios}. Packets: {packets}. Payload: {payload} bytes.",
+    "aggregationBenchmarkScenariosTitle": "Scenario Comparison",
+    "aggregationBenchmarkBaseline": "Baseline",
+    "aggregationBenchmarkAggregated": "Aggregated",
+    "aggregationBenchmarkResultSummary": "{label}: startup {startup}. Stalls {stalls}. Goodput {goodput}. Loss {loss}. Stability {stability}.",
+    "aggregationBenchmarkGainSummary": "Gains: startup {latency}, stalls {stalls}, goodput {goodput}, loss {loss}, stability {stability}.",
+    "aggregationBenchmarkScenario": {
+      "clean_paths": "Clean Paths",
+      "degraded_primary": "Degraded Primary Path"
+    },
     "aggregationEnabled": "Enable experimental UDP/QUIC aggregation",
     "aggregationMode": "Experimental aggregation mode",
     "aggregationModeOptions": {

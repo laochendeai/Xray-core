@@ -158,6 +158,127 @@
             </div>
           </n-space>
         </n-card>
+        <n-card v-if="aggregationRelay" size="small" class="aggregation-prototype-card">
+          <n-space vertical :size="12">
+            <strong>{{ t('nodePool.aggregationRelayTitle') }}</strong>
+            <div class="node-pool-meta">
+              {{
+                t('nodePool.aggregationRelaySummary', {
+                  version: aggregationRelay.contractVersion,
+                  endpoint: aggregationRelay.endpoint || '-',
+                  sessions: aggregationRelay.sessionCount,
+                  delivered: aggregationRelay.deliveredPacketCount,
+                  packets: aggregationRelay.packetCount,
+                  duplicates: aggregationRelay.duplicateDrops,
+                  reordered: aggregationRelay.reorderedPackets,
+                  buffer: aggregationRelay.maxReorderBufferDepth
+                })
+              }}
+            </div>
+            <div v-if="aggregationRelay.note" class="node-pool-meta">
+              {{ aggregationRelay.note }}
+            </div>
+
+            <div v-if="aggregationRelay.sessions.length" class="aggregation-prototype-block">
+              <strong>{{ t('nodePool.aggregationRelaySessionsTitle') }}</strong>
+              <n-list bordered>
+                <n-list-item v-for="session in aggregationRelay.sessions" :key="session.sessionId">
+                  <div class="event-row">
+                    <div class="event-main">
+                      <n-space align="center" :size="8" wrap>
+                        <strong>{{ session.flow }}</strong>
+                        <n-tag size="small">{{ aggregationSchedulerPolicyLabel(session.schedulerPolicy) }}</n-tag>
+                      </n-space>
+                      <div class="node-pool-meta">
+                        {{
+                          t('nodePool.aggregationRelaySessionSummary', {
+                            paths: formatPathIds(session.pathIds),
+                            delivered: session.deliveredPacketCount,
+                            packets: session.packetCount,
+                            startup: formatDurationMs(session.startupLatencyMs),
+                            stalls: session.stallCount,
+                            goodput: formatAggregationGoodput(session.goodputKbps),
+                            duplicates: session.duplicateDrops,
+                            reordered: session.reorderedPackets,
+                            buffer: session.maxReorderBufferDepth
+                          })
+                        }}
+                      </div>
+                      <div class="node-pool-meta">{{ session.reason }}</div>
+                    </div>
+                  </div>
+                </n-list-item>
+              </n-list>
+            </div>
+          </n-space>
+        </n-card>
+        <n-card v-if="aggregationBenchmark" size="small" class="aggregation-prototype-card">
+          <n-space vertical :size="12">
+            <strong>{{ t('nodePool.aggregationBenchmarkTitle') }}</strong>
+            <div class="node-pool-meta">
+              {{
+                t('nodePool.aggregationBenchmarkSummary', {
+                  scenarios: aggregationBenchmark.scenarios.length,
+                  packets: aggregationBenchmark.packetCount,
+                  payload: aggregationBenchmark.payloadBytes
+                })
+              }}
+            </div>
+            <div v-if="aggregationBenchmark.note" class="node-pool-meta">
+              {{ aggregationBenchmark.note }}
+            </div>
+
+            <div v-if="aggregationBenchmark.scenarios.length" class="aggregation-prototype-block">
+              <strong>{{ t('nodePool.aggregationBenchmarkScenariosTitle') }}</strong>
+              <n-list bordered>
+                <n-list-item v-for="scenario in aggregationBenchmark.scenarios" :key="scenario.name">
+                  <div class="event-row">
+                    <div class="event-main">
+                      <n-space align="center" :size="8" wrap>
+                        <strong>{{ aggregationBenchmarkScenarioLabel(scenario.name) }}</strong>
+                      </n-space>
+                      <div class="node-pool-meta">
+                        {{
+                          t('nodePool.aggregationBenchmarkResultSummary', {
+                            label: t('nodePool.aggregationBenchmarkBaseline'),
+                            startup: formatDurationMs(scenario.baseline.startupLatencyMs),
+                            stalls: scenario.baseline.stallCount,
+                            goodput: formatAggregationGoodput(scenario.baseline.goodputKbps),
+                            loss: formatLossPct(scenario.baseline.lossPct),
+                            stability: formatLossPct(scenario.baseline.stabilityPct)
+                          })
+                        }}
+                      </div>
+                      <div class="node-pool-meta">
+                        {{
+                          t('nodePool.aggregationBenchmarkResultSummary', {
+                            label: t('nodePool.aggregationBenchmarkAggregated'),
+                            startup: formatDurationMs(scenario.aggregated.startupLatencyMs),
+                            stalls: scenario.aggregated.stallCount,
+                            goodput: formatAggregationGoodput(scenario.aggregated.goodputKbps),
+                            loss: formatLossPct(scenario.aggregated.lossPct),
+                            stability: formatLossPct(scenario.aggregated.stabilityPct)
+                          })
+                        }}
+                      </div>
+                      <div class="node-pool-meta">
+                        {{
+                          t('nodePool.aggregationBenchmarkGainSummary', {
+                            latency: formatSignedMetric(scenario.startupLatencyGainMs, 'ms', 0),
+                            stalls: formatSignedInt(scenario.stallReduction),
+                            goodput: formatSignedMetric(scenario.goodputGainKbps, ' kbps'),
+                            loss: formatSignedMetric(scenario.lossReductionPct, 'pp'),
+                            stability: formatSignedMetric(scenario.stabilityGainPct, 'pp')
+                          })
+                        }}
+                      </div>
+                    </div>
+                  </div>
+                </n-list-item>
+              </n-list>
+            </div>
+          </n-space>
+        </n-card>
         <n-form :model="tunSettingsForm" label-placement="left" label-width="220px">
           <n-form-item :label="t('nodePool.aggregationEnabled')">
             <n-switch v-model:value="tunSettingsForm.aggregation.enabled" />
@@ -1023,6 +1144,9 @@ import type {
   NodeEvent,
   NodeExitIPStatus,
   NodeIntelligenceConfidence,
+  TunAggregationBenchmarkResult,
+  TunAggregationBenchmarkScenarioName,
+  TunAggregationBenchmarkStatus,
   NodePoolDashboardResponse,
   NodePoolSummary,
   NodeNetworkType,
@@ -1031,6 +1155,7 @@ import type {
   TunAggregationMode,
   TunAggregationPrototypePathState,
   TunAggregationPrototypeStatus,
+  TunAggregationRelayStatus,
   TunAggregationSchedulerPolicy,
   TunAggregationSettings,
   TunAggregationStatus,
@@ -1108,7 +1233,9 @@ function createDefaultAggregationStatus(): TunAggregationStatus {
     schedulerPolicy: defaults.schedulerPolicy,
     relayEndpoint: '',
     reason: '',
-    prototype: undefined
+    prototype: undefined,
+    relay: undefined,
+    benchmark: undefined
   }
 }
 
@@ -1125,6 +1252,40 @@ function createDefaultAggregationPrototype(): TunAggregationPrototypeStatus {
   }
 }
 
+function createDefaultAggregationRelay(): TunAggregationRelayStatus {
+  return {
+    ready: false,
+    contractVersion: 'relay_preview_v1',
+    endpoint: '',
+    sessionCount: 0,
+    packetCount: 0,
+    deliveredPacketCount: 0,
+    duplicateDrops: 0,
+    reorderedPackets: 0,
+    maxReorderBufferDepth: 0,
+    sessions: []
+  }
+}
+
+function createDefaultAggregationBenchmarkResult(): TunAggregationBenchmarkResult {
+  return {
+    startupLatencyMs: 0,
+    stallCount: 0,
+    goodputKbps: 0,
+    lossPct: 0,
+    stabilityPct: 0
+  }
+}
+
+function createDefaultAggregationBenchmark(): TunAggregationBenchmarkStatus {
+  return {
+    ready: false,
+    packetCount: 0,
+    payloadBytes: 0,
+    scenarios: []
+  }
+}
+
 function normalizeAggregationPrototype(value?: Partial<TunAggregationPrototypeStatus>): TunAggregationPrototypeStatus {
   const base = createDefaultAggregationPrototype()
   return {
@@ -1135,13 +1296,46 @@ function normalizeAggregationPrototype(value?: Partial<TunAggregationPrototypeSt
   }
 }
 
+function normalizeAggregationRelay(value?: Partial<TunAggregationRelayStatus>): TunAggregationRelayStatus {
+  const base = createDefaultAggregationRelay()
+  return {
+    ...base,
+    ...value,
+    endpoint: (value?.endpoint || '').trim(),
+    sessions: Array.isArray(value?.sessions) ? value!.sessions : []
+  }
+}
+
+function normalizeAggregationBenchmark(value?: Partial<TunAggregationBenchmarkStatus>): TunAggregationBenchmarkStatus {
+  const base = createDefaultAggregationBenchmark()
+  return {
+    ...base,
+    ...value,
+    scenarios: Array.isArray(value?.scenarios)
+      ? value!.scenarios.map((scenario) => ({
+          ...scenario,
+          baseline: {
+            ...createDefaultAggregationBenchmarkResult(),
+            ...scenario.baseline
+          },
+          aggregated: {
+            ...createDefaultAggregationBenchmarkResult(),
+            ...scenario.aggregated
+          }
+        }))
+      : []
+  }
+}
+
 function normalizeAggregationStatus(value?: Partial<TunAggregationStatus>): TunAggregationStatus {
   const base = createDefaultAggregationStatus()
   return {
     ...base,
     ...value,
     relayEndpoint: (value?.relayEndpoint || '').trim(),
-    prototype: value?.prototype ? normalizeAggregationPrototype(value.prototype) : undefined
+    prototype: value?.prototype ? normalizeAggregationPrototype(value.prototype) : undefined,
+    relay: value?.relay ? normalizeAggregationRelay(value.relay) : undefined,
+    benchmark: value?.benchmark ? normalizeAggregationBenchmark(value.benchmark) : undefined
   }
 }
 
@@ -1505,6 +1699,10 @@ function aggregationPrototypePathStateLabel(state?: TunAggregationPrototypePathS
   return translateCode('nodePool.aggregationPrototypePathState', state || 'excluded')
 }
 
+function aggregationBenchmarkScenarioLabel(name?: TunAggregationBenchmarkScenarioName) {
+  return translateCode('nodePool.aggregationBenchmarkScenario', name || 'clean_paths')
+}
+
 function aggregationPrototypePathStateTagType(state?: TunAggregationPrototypePathState) {
   switch (state) {
     case 'selected':
@@ -1577,9 +1775,32 @@ function aggregationLatencyLabel(latencyMs?: number) {
   return latencyMs && latencyMs > 0 ? `${latencyMs}ms` : '-'
 }
 
+function formatDurationMs(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value < 0) return '-'
+  return `${Math.round(value)}ms`
+}
+
 function formatLossPct(value?: number) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '-'
   return `${value.toFixed(1)}%`
+}
+
+function formatAggregationGoodput(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return `${value.toFixed(1)} kbps`
+}
+
+function formatSignedMetric(value: number | undefined, suffix: string, digits = 1) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  const sign = value >= 0 ? '+' : ''
+  return `${sign}${value.toFixed(digits)}${suffix}`
+}
+
+function formatSignedInt(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  const rounded = Math.round(value)
+  const sign = rounded >= 0 ? '+' : ''
+  return `${sign}${rounded}`
 }
 
 function formatAggregationScore(value?: number) {
@@ -2090,6 +2311,16 @@ const aggregationStatusSummary = computed(() => {
 const aggregationPrototype = computed(() => {
   const prototype = tunStatus.value.aggregation?.prototype
   return prototype ? normalizeAggregationPrototype(prototype) : null
+})
+
+const aggregationRelay = computed(() => {
+  const relay = tunStatus.value.aggregation?.relay
+  return relay ? normalizeAggregationRelay(relay) : null
+})
+
+const aggregationBenchmark = computed(() => {
+  const benchmark = tunStatus.value.aggregation?.benchmark
+  return benchmark ? normalizeAggregationBenchmark(benchmark) : null
 })
 
 async function refreshAll() {

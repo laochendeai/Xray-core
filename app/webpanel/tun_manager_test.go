@@ -2047,6 +2047,12 @@ func TestTunManagerStartWritesAggregationRuntimeState(t *testing.T) {
 	if runtimeState.Prototype.SessionCount != 1 {
 		t.Fatalf("expected one prototype session, got %#v", runtimeState.Prototype)
 	}
+	if runtimeState.Relay == nil || !runtimeState.Relay.Ready {
+		t.Fatalf("expected relay prototype diagnostics in runtime state, got %#v", runtimeState)
+	}
+	if runtimeState.Benchmark == nil || !runtimeState.Benchmark.Ready {
+		t.Fatalf("expected benchmark diagnostics in runtime state, got %#v", runtimeState)
+	}
 }
 
 type tunStatusTestPaths struct {

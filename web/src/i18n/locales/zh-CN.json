@@ -506,6 +506,21 @@
       "standby": "待命",
       "excluded": "已排除"
     },
+    "aggregationRelayTitle": "Relay 原型",
+    "aggregationRelaySummary": "合同版本: {version}。端点: {endpoint}。会话数: {sessions}。已交付: {delivered}/{packets}。去重丢弃: {duplicates}。乱序包: {reordered}。最大缓冲深度: {buffer}。",
+    "aggregationRelaySessionsTitle": "Relay 会话预览",
+    "aggregationRelaySessionSummary": "路径: {paths}。已交付 {delivered}/{packets}。启动时延 {startup}。卡顿次数 {stalls}。有效吞吐 {goodput}。去重丢弃 {duplicates}。乱序包 {reordered}。缓冲深度 {buffer}。",
+    "aggregationBenchmarkTitle": "合成 Benchmark",
+    "aggregationBenchmarkSummary": "场景数: {scenarios}。报文数: {packets}。单报文载荷: {payload} 字节。",
+    "aggregationBenchmarkScenariosTitle": "场景对比",
+    "aggregationBenchmarkBaseline": "基线",
+    "aggregationBenchmarkAggregated": "聚合",
+    "aggregationBenchmarkResultSummary": "{label}: 启动时延 {startup}。卡顿 {stalls}。有效吞吐 {goodput}。丢包 {loss}。稳定性 {stability}。",
+    "aggregationBenchmarkGainSummary": "收益: 启动时延 {latency}，卡顿 {stalls}，有效吞吐 {goodput}，丢包 {loss}，稳定性 {stability}。",
+    "aggregationBenchmarkScenario": {
+      "clean_paths": "健康路径",
+      "degraded_primary": "主路径退化"
+    },
     "aggregationEnabled": "启用实验性 UDP/QUIC 聚合",
     "aggregationMode": "实验聚合模式",
     "aggregationModeOptions": {

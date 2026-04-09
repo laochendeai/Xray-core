@@ -178,6 +178,8 @@ type TunAggregationStatus struct {
 	RelayEndpoint      string                         `json:"relayEndpoint,omitempty"`
 	Reason             string                         `json:"reason"`
 	Prototype          *TunAggregationPrototypeStatus `json:"prototype,omitempty"`
+	Relay              *TunAggregationRelayStatus     `json:"relay,omitempty"`
+	Benchmark          *TunAggregationBenchmarkStatus `json:"benchmark,omitempty"`
 }
 
 type TunFeatureSettings struct {
@@ -1274,6 +1276,7 @@ func writeTunAggregationRuntimeState(settings *TunFeatureSettings, activeNodes [
 		return nil
 	}
 	attachTunAggregationPrototype(runtimeState, settings, activeNodes, time.Now())
+	attachTunAggregationRelayDiagnostics(runtimeState, settings, time.Now())
 
 	raw, err := json.MarshalIndent(runtimeState, "", "  ")
 	if err != nil {
@@ -1854,7 +1857,7 @@ func buildTunAggregationStatus(settings *TunFeatureSettings) *TunAggregationStat
 	status.Status = string(TunAggregationStatusRequested)
 	status.Ready = true
 	status.RelayConfigured = true
-	status.Reason = "Experimental UDP/QUIC aggregation is configured behind the feature flag. The local scheduler/session prototype is available for diagnostics, but the effective transparent path stays on stable single-path mode until relay integration lands."
+	status.Reason = "Experimental UDP/QUIC aggregation is configured behind the feature flag. Local scheduler diagnostics, the relay-side assembler preview, and the synthetic benchmark harness are available, but the effective transparent path stays on stable single-path mode until live packet steering lands."
 	return status
 }
 

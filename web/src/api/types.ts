@@ -361,6 +361,67 @@ export interface TunAggregationPrototypeStatus {
   note?: string
 }
 
+export interface TunAggregationRelaySession {
+  sessionId: string
+  flow: string
+  schedulerPolicy: TunAggregationSchedulerPolicy
+  pathIds?: string[]
+  packetCount: number
+  deliveredPacketCount: number
+  duplicateDrops: number
+  reorderedPackets: number
+  maxReorderBufferDepth: number
+  deliveredBytes: number
+  startupLatencyMs: number
+  stallCount: number
+  goodputKbps: number
+  reason: string
+  createdAt: string
+}
+
+export interface TunAggregationRelayStatus {
+  ready: boolean
+  contractVersion: string
+  endpoint?: string
+  sessionCount: number
+  packetCount: number
+  deliveredPacketCount: number
+  duplicateDrops: number
+  reorderedPackets: number
+  maxReorderBufferDepth: number
+  sessions: TunAggregationRelaySession[]
+  note?: string
+}
+
+export type TunAggregationBenchmarkScenarioName = 'clean_paths' | 'degraded_primary'
+
+export interface TunAggregationBenchmarkResult {
+  startupLatencyMs: number
+  stallCount: number
+  goodputKbps: number
+  lossPct: number
+  stabilityPct: number
+}
+
+export interface TunAggregationBenchmarkScenario {
+  name: TunAggregationBenchmarkScenarioName
+  baseline: TunAggregationBenchmarkResult
+  aggregated: TunAggregationBenchmarkResult
+  startupLatencyGainMs: number
+  stallReduction: number
+  goodputGainKbps: number
+  lossReductionPct: number
+  stabilityGainPct: number
+}
+
+export interface TunAggregationBenchmarkStatus {
+  ready: boolean
+  packetCount: number
+  payloadBytes: number
+  scenarios: TunAggregationBenchmarkScenario[]
+  note?: string
+}
+
 export interface TunAggregationStatus {
   enabled: boolean
   status: TunAggregationStatusCode
@@ -374,6 +435,8 @@ export interface TunAggregationStatus {
   relayEndpoint?: string
   reason: string
   prototype?: TunAggregationPrototypeStatus
+  relay?: TunAggregationRelayStatus
+  benchmark?: TunAggregationBenchmarkStatus
 }
 
 export interface TunStatusResponse {
