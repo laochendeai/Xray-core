@@ -164,6 +164,9 @@ export type TransitionReason =
   | 'migration_legacy_demoted'
 
 export type CleanlinessStatus = 'unknown' | 'trusted' | 'suspicious'
+export type NodeExitIPStatus = 'unknown' | 'available' | 'error'
+export type NodeNetworkType = 'unknown' | 'residential_likely' | 'datacenter_likely'
+export type NodeIntelligenceConfidence = 'unknown' | 'low' | 'medium' | 'high'
 export type MachineState = 'clean' | 'proxied' | 'degraded' | 'recovering'
 export type MachineStateReason =
   | 'startup_default_clean'
@@ -212,7 +215,22 @@ export interface NodeRecord {
   consecutiveFails: number
   lastCheckedAt?: string
   cleanliness: CleanlinessStatus
+  cleanlinessReason?: string
+  cleanlinessDetail?: string
+  cleanlinessConfidence: NodeIntelligenceConfidence
   bandwidthTier: string
+  exitIpStatus: NodeExitIPStatus
+  exitIp?: string
+  exitIpSource?: string
+  exitIpError?: string
+  exitIpCheckedAt?: string
+  networkType: NodeNetworkType
+  networkTypeReason?: string
+  networkTypeDetail?: string
+  networkTypeConfidence: NodeIntelligenceConfidence
+  intelligenceExitIp?: string
+  intelligenceCheckedAt?: string
+  intelligenceError?: string
 }
 
 export interface NodeEvent {

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NodeRecord } from '@/api/types'
-import { failRateValue, normalizeListInput, sortPoolNodes, sortRemovedNodes } from '@/utils/nodePool'
+import {
+  failRateValue,
+  firstNodeIntelligenceDetail,
+  normalizeListInput,
+  sortPoolNodes,
+  sortRemovedNodes,
+  summarizeNodeIntelligence
+} from '@/utils/nodePool'
 
 function makeNode(overrides: Partial<NodeRecord>): NodeRecord {
   return {
@@ -25,7 +32,11 @@ function makeNode(overrides: Partial<NodeRecord>): NodeRecord {
     consecutiveFails: 0,
     lastCheckedAt: '2026-01-01T00:00:00Z',
     cleanliness: 'unknown',
+    cleanlinessConfidence: 'unknown',
     bandwidthTier: '',
+    exitIpStatus: 'unknown',
+    networkType: 'unknown',
+    networkTypeConfidence: 'unknown',
     ...overrides
   }
 }
@@ -91,5 +102,56 @@ describe('node pool utilities', () => {
 
   it('returns infinity for nodes without probe samples', () => {
     expect(failRateValue(makeNode({ totalPings: 0, failedPings: 0 }))).toBe(Number.POSITIVE_INFINITY)
+  })
+
+  it('summarizes cleanliness and network-type verdicts', () => {
+    const trustedResidential = makeNode({
+      id: 'trusted',
+      cleanliness: 'trusted',
+      networkType: 'residential_likely'
+    })
+    const suspiciousDatacenter = makeNode({
+      id: 'suspicious',
+      cleanliness: 'suspicious',
+      networkType: 'datacenter_likely'
+    })
+    const unknown = makeNode({
+      id: 'unknown',
+      cleanliness: 'unknown',
+      networkType: 'unknown'
+    })
+
+    expect(summarizeNodeIntelligence([trustedResidential, suspiciousDatacenter, unknown])).toEqual({
+      trustedCount: 1,
+      suspiciousCount: 1,
+      unknownCleanCount: 1,
+      residentialCount: 1,
+      datacenterCount: 1,
+      unknownNetworkCount: 1
+    })
+  })
+
+  it('picks the first usable intelligence detail', () => {
+    expect(
+      firstNodeIntelligenceDetail(
+        makeNode({
+          cleanlinessDetail: '',
+          networkTypeDetail: 'network detail',
+          intelligenceError: 'lookup error',
+          exitIpError: 'exit-ip error'
+        })
+      )
+    ).toBe('network detail')
+
+    expect(
+      firstNodeIntelligenceDetail(
+        makeNode({
+          cleanlinessDetail: '',
+          networkTypeDetail: '',
+          intelligenceError: '',
+          exitIpError: ''
+        })
+      )
+    ).toBe('')
   })
 })

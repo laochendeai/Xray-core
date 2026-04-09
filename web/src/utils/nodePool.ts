@@ -17,6 +17,15 @@ export type RemovedSortMode =
   | 'avg_delay_asc'
   | 'avg_delay_desc'
 
+export interface NodeIntelligenceSummary {
+  trustedCount: number
+  suspiciousCount: number
+  unknownCleanCount: number
+  residentialCount: number
+  datacenterCount: number
+  unknownNetworkCount: number
+}
+
 export function failRateValue(node: Pick<NodeRecord, 'totalPings' | 'failedPings'>): number {
   if (!node.totalPings) return Number.POSITIVE_INFINITY
   return node.failedPings / node.totalPings
@@ -117,6 +126,60 @@ export function sortRemovedNodes(entries: NodeRecord[], mode: RemovedSortMode): 
         return removedAtValue(b) - removedAtValue(a)
     }
   })
+}
+
+export function summarizeNodeIntelligence(
+  entries: Array<Pick<NodeRecord, 'cleanliness' | 'networkType'>>
+): NodeIntelligenceSummary {
+  return entries.reduce<NodeIntelligenceSummary>(
+    (summary, node) => {
+      switch (node.cleanliness) {
+        case 'trusted':
+          summary.trustedCount += 1
+          break
+        case 'suspicious':
+          summary.suspiciousCount += 1
+          break
+        default:
+          summary.unknownCleanCount += 1
+          break
+      }
+
+      switch (node.networkType) {
+        case 'residential_likely':
+          summary.residentialCount += 1
+          break
+        case 'datacenter_likely':
+          summary.datacenterCount += 1
+          break
+        default:
+          summary.unknownNetworkCount += 1
+          break
+      }
+
+      return summary
+    },
+    {
+      trustedCount: 0,
+      suspiciousCount: 0,
+      unknownCleanCount: 0,
+      residentialCount: 0,
+      datacenterCount: 0,
+      unknownNetworkCount: 0
+    }
+  )
+}
+
+export function firstNodeIntelligenceDetail(
+  node: Pick<NodeRecord, 'cleanlinessDetail' | 'networkTypeDetail' | 'intelligenceError' | 'exitIpError'>
+): string {
+  const candidates = [node.cleanlinessDetail, node.networkTypeDetail, node.intelligenceError, node.exitIpError]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim()
+    }
+  }
+  return ''
 }
 
 export function normalizeListInput(value: string): string[] {
