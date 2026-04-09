@@ -73,6 +73,33 @@
                 <n-descriptions-item :label="t('settings.runtimeConfigPath')">{{ tunStatus.runtimeConfigPath || '-' }}</n-descriptions-item>
               </n-descriptions>
 
+              <n-card size="small" embedded :title="t('settings.egressObservations')">
+                <n-descriptions bordered :column="1" size="small">
+                  <n-descriptions-item :label="t('settings.directEgress')">{{ tunEgressHeadline(tunStatus.directEgress) }}</n-descriptions-item>
+                  <n-descriptions-item :label="t('settings.proxyEgress')">{{ tunEgressHeadline(tunStatus.proxyEgress) }}</n-descriptions-item>
+                </n-descriptions>
+                <div v-if="tunEgressMeta(tunStatus.directEgress)" class="settings-tun-meta">
+                  <strong>{{ t('settings.directEgress') }}:</strong> {{ tunEgressMeta(tunStatus.directEgress) }}
+                </div>
+                <div v-if="tunEgressMeta(tunStatus.proxyEgress)" class="settings-tun-meta">
+                  <strong>{{ t('settings.proxyEgress') }}:</strong> {{ tunEgressMeta(tunStatus.proxyEgress) }}
+                </div>
+              </n-card>
+
+              <n-card size="small" embedded :title="t('settings.routingDecisions')">
+                <div v-if="routingDiagnostics.length" class="settings-routing-list">
+                  <div v-for="item in routingDiagnostics" :key="item.category" class="settings-routing-item">
+                    <div class="settings-routing-title">{{ routingDiagnosticTitle(item) }}</div>
+                    <div class="settings-tun-meta">{{ t('settings.dnsPath') }}: {{ item.dnsPath || '-' }}</div>
+                    <div class="settings-tun-meta">{{ t('settings.resolver') }}: {{ item.resolver || '-' }}</div>
+                    <div class="settings-tun-meta">{{ t('settings.routeLabel') }}: {{ item.route || '-' }}</div>
+                    <div class="settings-tun-meta">{{ t('settings.decisionReason') }}: {{ item.reason || '-' }}</div>
+                    <div v-if="item.domains?.length" class="settings-tun-meta">{{ item.domains.join(', ') }}</div>
+                  </div>
+                </div>
+                <n-empty v-else :description="t('settings.noRoutingDiagnostics')" />
+              </n-card>
+
               <n-alert v-if="tunDiagnostics.length" type="warning" :title="t('settings.tunDiagnostics')">
                 <div v-for="item in tunDiagnostics" :key="item">{{ item }}</div>
               </n-alert>
@@ -145,7 +172,7 @@ import { useRouter } from 'vue-router'
 import { NSpace, NTabs, NTabPane, NCard, NDescriptions, NDescriptionsItem, NButton, NDataTable, NEmpty, NAlert, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { configAPI, loggerAPI, observatoryAPI, tunAPI } from '@/api/client'
-import type { MachineState, MachineStateReason } from '@/api/types'
+import type { MachineState, MachineStateReason, TunEgressObservation, TunRoutingDiagnostic, TunStatusResponse } from '@/api/types'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -160,7 +187,7 @@ const loadingObs = ref(false)
 const restarting = ref(false)
 const loadingTun = ref(false)
 const installingTunBootstrap = ref(false)
-const tunStatus = ref<any>({
+const tunStatus = ref<TunStatusResponse>({
   status: 'unknown',
   running: false,
   available: false,
@@ -171,14 +198,19 @@ const tunStatus = ref<any>({
   helperCurrent: true,
   binaryCurrent: true,
   privilegeInstallRecommended: false,
+  binaryPath: '',
   helperPath: '',
+  stateDir: '',
   runtimeConfigPath: '',
   interfaceName: '',
   mtu: 0,
   remoteDns: [],
+  configPath: '',
+  xrayBinary: '',
   message: '',
   lastOutput: '',
-  diagnostics: []
+  diagnostics: [],
+  routingDiagnostics: []
 })
 
 const obsColumns: DataTableColumns = [
@@ -202,10 +234,35 @@ const tunStatusType = computed(() => {
 })
 
 const tunDiagnostics = computed(() => Array.isArray(tunStatus.value.diagnostics) ? tunStatus.value.diagnostics : [])
+const routingDiagnostics = computed<TunRoutingDiagnostic[]>(() => Array.isArray(tunStatus.value.routingDiagnostics) ? tunStatus.value.routingDiagnostics : [])
 const tunBootstrapNeeded = computed(() => Boolean(tunStatus.value.privilegeInstallRecommended))
 const tunRepairRecommended = computed(() => tunStatus.value.helperCurrent === false || tunStatus.value.binaryCurrent === false)
 const machineStateText = computed(() => translateCode('nodePool.machineStateLabel', (tunStatus.value.machineState || 'clean') as MachineState))
 const machineReasonText = computed(() => translateCode('nodePool.reason', (tunStatus.value.lastStateReason || 'startup_default_clean') as MachineStateReason))
+
+function tunEgressHeadline(observation?: TunEgressObservation) {
+  if (!observation) return '-'
+  const parts = [observation.status, observation.route]
+  if (observation.ip) {
+    parts.push(observation.ip)
+  }
+  return parts.filter(Boolean).join(' · ')
+}
+
+function tunEgressMeta(observation?: TunEgressObservation) {
+  if (!observation) return ''
+  const parts = [
+    observation.source ? `${t('settings.source')}: ${observation.source}` : '',
+    observation.checkedAt ? `${t('settings.checkedAt')}: ${new Date(observation.checkedAt).toLocaleString()}` : '',
+    observation.note ? `${t('settings.note')}: ${observation.note}` : '',
+    observation.error ? `${t('settings.lastError')}: ${observation.error}` : ''
+  ]
+  return parts.filter(Boolean).join(' · ')
+}
+
+function routingDiagnosticTitle(item: TunRoutingDiagnostic) {
+  return `${t('settings.diagnosticCategory')}: ${item.category}`
+}
 
 async function loadConfig() {
   try {
@@ -243,11 +300,12 @@ async function handleRestartLogger() {
   }
 }
 
-function applyTunStatus(data: any) {
+function applyTunStatus(data: Partial<TunStatusResponse>) {
   tunStatus.value = {
     ...tunStatus.value,
     ...data,
-    diagnostics: Array.isArray(data?.diagnostics) ? data.diagnostics : []
+    diagnostics: Array.isArray(data?.diagnostics) ? data.diagnostics : [],
+    routingDiagnostics: Array.isArray(data?.routingDiagnostics) ? data.routingDiagnostics : []
   }
 }
 
@@ -301,3 +359,28 @@ onMounted(() => {
   fetchTunStatus()
 })
 </script>
+
+<style scoped>
+.settings-routing-list {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-routing-item {
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.settings-routing-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.settings-tun-meta {
+  font-size: 13px;
+  color: var(--n-text-color-2);
+  margin-top: 8px;
+  word-break: break-word;
+}
+</style>
