@@ -290,6 +290,15 @@ export interface TunEgressObservation {
   error?: string
 }
 
+export interface TunRoutingDiagnostic {
+  category: string
+  dnsPath: string
+  resolver: string
+  route: string
+  reason: string
+  domains?: string[]
+}
+
 export type TunAggregationMode = 'single_best' | 'redundant_2' | 'weighted_split'
 export type TunAggregationSchedulerPolicy = 'single_best' | 'redundant_2' | 'weighted_split'
 export type TunAggregationStatusCode = 'disabled' | 'requested' | 'fallback_stable'
@@ -349,6 +358,7 @@ export interface TunStatusResponse {
   diagnostics?: string[]
   directEgress?: TunEgressObservation
   proxyEgress?: TunEgressObservation
+  routingDiagnostics?: TunRoutingDiagnostic[]
   aggregation?: TunAggregationStatus
   machineState?: MachineState
   lastStateReason?: MachineStateReason

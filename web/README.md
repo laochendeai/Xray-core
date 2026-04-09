@@ -165,7 +165,7 @@ make build-dev
 - 策略配置查看
 - Observatory 出站健康状态表
 - API 设置查看
-- TUN 诊断信息查看
+- TUN 诊断信息查看，包括 direct / proxy egress 语义和结构化 DNS / 路由决策
 - 这里主要保留诊断信息；透明模式主控制入口已经转移到节点池页
 
 ### 配置管理 (`/config`)
