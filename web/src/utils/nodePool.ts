@@ -1,4 +1,4 @@
-import type { NodeRecord } from '@/api/types'
+import type { NodeRecord, TunDestinationBinding, TunDestinationBindingPreset } from '@/api/types'
 
 export type PoolSortMode =
   | 'quality'
@@ -24,6 +24,24 @@ export interface NodeIntelligenceSummary {
   residentialCount: number
   datacenterCount: number
   unknownNetworkCount: number
+}
+
+export const tunDestinationBindingPresetDomains: Record<Exclude<TunDestinationBindingPreset, 'custom'>, string[]> = {
+  openai: [
+    'domain:openai.com',
+    'domain:api.openai.com',
+    'domain:auth.openai.com',
+    'domain:chatgpt.com',
+    'domain:chat.openai.com',
+    'domain:oaistatic.com',
+    'domain:oaiusercontent.com'
+  ],
+  chatgpt: [
+    'domain:chatgpt.com',
+    'domain:chat.openai.com',
+    'domain:oaistatic.com',
+    'domain:oaiusercontent.com'
+  ]
 }
 
 export function failRateValue(node: Pick<NodeRecord, 'totalPings' | 'failedPings'>): number {
@@ -189,6 +207,42 @@ export function normalizeListInput(value: string): string[] {
         .split(/[\n,]/)
         .map((item) => item.trim())
         .filter(Boolean)
+      )
+  )
+}
+
+export function bindingPreviewDomains(binding: Pick<TunDestinationBinding, 'preset' | 'domains'>): string[] {
+  if (binding.preset === 'custom') {
+    return normalizeBindingDomainRules(binding.domains)
+  }
+  return tunDestinationBindingPresetDomains[binding.preset] || []
+}
+
+export function bindingPrimaryTestDomain(binding: Pick<TunDestinationBinding, 'preset' | 'domains'>): string {
+  const first = bindingPreviewDomains(binding)[0] || ''
+  return first.replace(/^(full:|domain:)/, '')
+}
+
+function normalizeBindingDomainRules(values: string[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => normalizeBindingDomainRule(value))
+        .filter(Boolean)
     )
   )
+}
+
+function normalizeBindingDomainRule(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('*.')) {
+    const host = trimmed.slice(2).replace(/^\.+|\.+$/g, '')
+    return host ? `domain:${host}` : ''
+  }
+  if (trimmed.startsWith('.')) {
+    const host = trimmed.slice(1).replace(/^\.+|\.+$/g, '')
+    return host ? `domain:${host}` : ''
+  }
+  return trimmed
 }

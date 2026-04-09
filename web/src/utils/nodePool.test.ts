@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { NodeRecord } from '@/api/types'
 import {
+  bindingPreviewDomains,
+  bindingPrimaryTestDomain,
   failRateValue,
   firstNodeIntelligenceDetail,
   normalizeListInput,
@@ -153,5 +155,14 @@ describe('node pool utilities', () => {
         })
       )
     ).toBe('')
+  })
+
+  it('expands preset destination bindings and picks a test domain', () => {
+    expect(bindingPreviewDomains({ preset: 'openai', domains: [] })).toContain('domain:api.openai.com')
+    expect(bindingPrimaryTestDomain({ preset: 'chatgpt', domains: [] })).toBe('chatgpt.com')
+    expect(bindingPreviewDomains({ preset: 'custom', domains: ['*.ignored.example', 'domain:custom.example'] })).toEqual([
+      'domain:ignored.example',
+      'domain:custom.example'
+    ])
   })
 })
