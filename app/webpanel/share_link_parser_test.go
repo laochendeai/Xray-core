@@ -81,6 +81,22 @@ func TestParseSubscriptionContentIncludesAnyTLS(t *testing.T) {
 	}
 }
 
+func TestParseShareLinkURIParsesVLESSEncryption(t *testing.T) {
+	t.Parallel()
+
+	req, err := ParseShareLinkURI(`vless://11111111-1111-1111-1111-111111111111@example.com:443?type=tcp&security=tls&encryption=mlkem768x25519plus#pq-vless`)
+	if err != nil {
+		t.Fatalf("ParseShareLinkURI returned error: %v", err)
+	}
+
+	if req.Protocol != "vless" {
+		t.Fatalf("expected vless protocol, got %q", req.Protocol)
+	}
+	if req.Security != "mlkem768x25519plus" {
+		t.Fatalf("expected vless encryption to be preserved, got %q", req.Security)
+	}
+}
+
 func TestParseShareLinkURIParsesSSV2RayPlugin(t *testing.T) {
 	t.Parallel()
 
@@ -258,6 +274,49 @@ func TestBuildOutboundJSONUsesTopLevelHysteriaAddress(t *testing.T) {
 	}
 	if _, ok := settings["server"]; ok {
 		t.Fatal("did not expect nested hysteria server object")
+	}
+}
+
+func TestBuildOutboundJSONPreservesVLESSEncryption(t *testing.T) {
+	t.Parallel()
+
+	req, err := ParseShareLinkURI(`vless://11111111-1111-1111-1111-111111111111@example.com:443?type=tcp&security=tls&encryption=mlkem768x25519plus#pq-vless`)
+	if err != nil {
+		t.Fatalf("ParseShareLinkURI returned error: %v", err)
+	}
+
+	outboundJSON, err := BuildOutboundJSON(req, "pool-vless-encryption")
+	if err != nil {
+		t.Fatalf("BuildOutboundJSON returned error: %v", err)
+	}
+
+	var outbound map[string]any
+	if err := json.Unmarshal(outboundJSON, &outbound); err != nil {
+		t.Fatalf("unmarshal outbound JSON: %v", err)
+	}
+
+	settings, ok := outbound["settings"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected settings object, got %T", outbound["settings"])
+	}
+	vnext, ok := settings["vnext"].([]any)
+	if !ok || len(vnext) != 1 {
+		t.Fatalf("expected one vnext entry, got %#v", settings["vnext"])
+	}
+	server, ok := vnext[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected vnext server object, got %T", vnext[0])
+	}
+	users, ok := server["users"].([]any)
+	if !ok || len(users) != 1 {
+		t.Fatalf("expected one vless user, got %#v", server["users"])
+	}
+	user, ok := users[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected vless user object, got %T", users[0])
+	}
+	if got := user["encryption"]; got != "mlkem768x25519plus" {
+		t.Fatalf("expected vless encryption mlkem768x25519plus, got %#v", got)
 	}
 }
 
