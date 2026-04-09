@@ -12,6 +12,8 @@ import (
 	anytls "github.com/xtls/xray-core/proxy/anytls"
 	hysteriaproxy "github.com/xtls/xray-core/proxy/hysteria"
 	shadowsocks2022 "github.com/xtls/xray-core/proxy/shadowsocks_2022"
+	vless "github.com/xtls/xray-core/proxy/vless"
+	vlessoutbound "github.com/xtls/xray-core/proxy/vless/outbound"
 	internettransport "github.com/xtls/xray-core/transport/internet"
 	salamandermask "github.com/xtls/xray-core/transport/internet/finalmask/salamander"
 	hysteriatransport "github.com/xtls/xray-core/transport/internet/hysteria"
@@ -154,6 +156,36 @@ func TestBuildOutboundHandlerConfigFromLinkBuildsRealityStream(t *testing.T) {
 	}
 	if realityConfig.ServerName != "" {
 		t.Fatalf("expected empty reality server name when link omits sni/host, got %q", realityConfig.ServerName)
+	}
+}
+
+func TestBuildOutboundHandlerConfigFromLinkPreservesVLESSEncryption(t *testing.T) {
+	t.Parallel()
+
+	link, err := ParseShareLinkURI(`vless://11111111-1111-1111-1111-111111111111@example.com:443?type=tcp&security=tls&encryption=mlkem768x25519plus#pq-vless`)
+	if err != nil {
+		t.Fatalf("parse vless encryption share link: %v", err)
+	}
+
+	config, err := buildOutboundHandlerConfigFromLink(link, "pool-vless-encryption-test")
+	if err != nil {
+		t.Fatalf("build outbound handler config from vless encryption link: %v", err)
+	}
+
+	proxyConfig, err := typedMessageAs[*vlessoutbound.Config](config.ProxySettings)
+	if err != nil {
+		t.Fatalf("decode vless proxy settings: %v", err)
+	}
+	if proxyConfig.GetVnext() == nil || proxyConfig.GetVnext().GetUser() == nil {
+		t.Fatal("expected vless server endpoint and user to be populated")
+	}
+
+	account, err := typedMessageAs[*vless.Account](proxyConfig.GetVnext().GetUser().GetAccount())
+	if err != nil {
+		t.Fatalf("decode vless account: %v", err)
+	}
+	if got := account.GetEncryption(); got != "mlkem768x25519plus" {
+		t.Fatalf("expected vless encryption mlkem768x25519plus, got %q", got)
 	}
 }
 

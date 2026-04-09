@@ -531,7 +531,7 @@ func buildVLESSSettings(req *ShareLinkRequest) map[string]interface{} {
 		"users": []map[string]interface{}{
 			{
 				"id":         req.UUID,
-				"encryption": "none",
+				"encryption": normalizedVLESSEncryption(req.Security),
 				"flow":       req.Flow,
 			},
 		},
