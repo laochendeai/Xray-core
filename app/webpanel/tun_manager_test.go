@@ -757,6 +757,72 @@ func TestTunManagerUpdateEditableSettingsPersistsDestinationBindings(t *testing.
 	}
 }
 
+func TestTunManagerUpdateEditableSettingsPersistsAggregationScaffolding(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "webpanel": {
+    "tun": {}
+  }
+}
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	tunManager, err := NewTunManager(configPath)
+	if err != nil {
+		t.Fatalf("new tun manager: %v", err)
+	}
+
+	settings, err := tunManager.UpdateEditableSettings(TunEditableSettings{
+		SelectionPolicy: string(TunSelectionPolicyFastest),
+		RouteMode:       string(TunRouteModeStrictProxy),
+		Aggregation: TunAggregationSettings{
+			Enabled:            true,
+			Mode:               "REDUNDANT_2",
+			MaxPathsPerSession: 12,
+			SchedulerPolicy:    "single_best",
+			RelayEndpoint:      "  https://relay.example/ingress  ",
+			Health: TunAggregationHealthSettings{
+				MaxSessionLossPct:             9,
+				MaxPathJitterMs:               45,
+				RollbackOnConsecutiveFailures: 7,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("update editable settings: %v", err)
+	}
+
+	expected := TunAggregationSettings{
+		Enabled:            true,
+		Mode:               string(TunAggregationModeRedundant2),
+		MaxPathsPerSession: 8,
+		SchedulerPolicy:    string(TunAggregationSchedulerPolicySingleBest),
+		RelayEndpoint:      "https://relay.example/ingress",
+		Health: TunAggregationHealthSettings{
+			MaxSessionLossPct:             9,
+			MaxPathJitterMs:               45,
+			RollbackOnConsecutiveFailures: 7,
+		},
+	}
+	if !reflect.DeepEqual(settings.Aggregation, expected) {
+		t.Fatalf("expected normalized aggregation settings %#v, got %#v", expected, settings.Aggregation)
+	}
+
+	loaded, err := tunManager.EditableSettings()
+	if err != nil {
+		t.Fatalf("reload editable settings: %v", err)
+	}
+	if !reflect.DeepEqual(loaded.Aggregation, expected) {
+		t.Fatalf("expected persisted aggregation settings %#v, got %#v", expected, loaded.Aggregation)
+	}
+}
+
 func TestTunManagerEditableSettingsNormalizesWildcardProtectDomainsFromConfig(t *testing.T) {
 	t.Parallel()
 
@@ -1867,6 +1933,107 @@ func TestTunManagerStatusFallsBackToCachedDirectEgressAfterLiveProbeFailure(t *t
 	}
 	if status.DirectEgress.Error != "direct probe timeout" {
 		t.Fatalf("expected probe failure to be surfaced, got %#v", status.DirectEgress)
+	}
+}
+
+func TestTunManagerStatusReportsAggregationFallbackWhenRelayEndpointMissing(t *testing.T) {
+	tunManager, _ := newStatusTestTunManager(t)
+
+	config := map[string]any{}
+	raw, err := os.ReadFile(tunManager.configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	webpanel := config["webpanel"].(map[string]any)
+	tun := webpanel["tun"].(map[string]any)
+	tun["aggregation"] = map[string]any{
+		"enabled":            true,
+		"mode":               "weighted_split",
+		"maxPathsPerSession": 3,
+		"schedulerPolicy":    "weighted_split",
+	}
+	updated, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("encode config: %v", err)
+	}
+	if err := os.WriteFile(tunManager.configPath, updated, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	status := tunManager.Status()
+	if status == nil || status.Aggregation == nil {
+		t.Fatalf("expected aggregation status, got %#v", status)
+	}
+	if status.Aggregation.Status != string(TunAggregationStatusFallbackStable) {
+		t.Fatalf("expected fallback aggregation status, got %#v", status.Aggregation)
+	}
+	if status.Aggregation.EffectivePath != string(TunAggregationPathStableSinglePath) {
+		t.Fatalf("expected stable effective path, got %#v", status.Aggregation)
+	}
+
+	diagnostics := strings.Join(status.Diagnostics, "\n")
+	if !strings.Contains(diagnostics, "Aggregation mode [fallback_stable]") {
+		t.Fatalf("expected aggregation diagnostic in status output\n%s", diagnostics)
+	}
+}
+
+func TestTunManagerStartWritesAggregationRuntimeState(t *testing.T) {
+	tunManager, paths := newStatusTestTunManager(t)
+
+	config := map[string]any{}
+	raw, err := os.ReadFile(tunManager.configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	webpanel := config["webpanel"].(map[string]any)
+	tun := webpanel["tun"].(map[string]any)
+	tun["aggregation"] = map[string]any{
+		"enabled":            true,
+		"mode":               "single_best",
+		"maxPathsPerSession": 2,
+		"schedulerPolicy":    "weighted_split",
+		"relayEndpoint":      "https://relay.example/ingress",
+	}
+	updated, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("encode config: %v", err)
+	}
+	if err := os.WriteFile(tunManager.configPath, updated, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	status := tunManager.Start([]NodeRecord{{
+		ID:  "node-1",
+		URI: mustGenerateTunTestURI(t, "203.0.113.44"),
+	}})
+	if status == nil {
+		t.Fatal("expected tun start status")
+	}
+	if status.Status == "error" || status.Status == "unavailable" {
+		t.Fatalf("expected successful start, got %#v", status)
+	}
+
+	runtimePath := filepath.Join(paths.stateDir, tunAggregationRuntimeFile)
+	runtimeRaw, err := os.ReadFile(runtimePath)
+	if err != nil {
+		t.Fatalf("read aggregation runtime state: %v", err)
+	}
+
+	var runtimeState TunAggregationStatus
+	if err := json.Unmarshal(runtimeRaw, &runtimeState); err != nil {
+		t.Fatalf("decode aggregation runtime state: %v", err)
+	}
+	if runtimeState.Status != string(TunAggregationStatusRequested) {
+		t.Fatalf("expected requested runtime aggregation state, got %#v", runtimeState)
+	}
+	if runtimeState.EffectivePath != string(TunAggregationPathStableSinglePath) {
+		t.Fatalf("expected stable effective path, got %#v", runtimeState)
 	}
 }
 

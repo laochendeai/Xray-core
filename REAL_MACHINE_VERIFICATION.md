@@ -81,6 +81,7 @@ Artifacts:
   - `tun-status.json`
   - `tun-settings.json`
   - `runtime-config.json`
+  - `aggregation-runtime.json` when experimental aggregation scaffolding has been configured
   - `route-probe-cache.json`
   - `egress-probe-cache.json`
   - route / rule / `resolvectl` captures

@@ -475,6 +475,37 @@
     "transparentRoutingWhitelistHint": "Domains are written to webpanel.tun.protectDomains, and IP/CIDR entries are written to webpanel.tun.protectCidrs. Built-in localhost, private CIDRs, and common local suffixes still stay direct. You can also enter *.example.com and it will be saved as domain:example.com.",
     "remoteDnsGuideTitle": "How To Configure Remote DNS",
     "remoteDnsGuideBody": "This list is used for foreign or other domains in transparent mode. You can add multiple remote DNS entries, and every entry is written into runtime in the exact order you configure. The panel no longer trims the list based on local-network probing, so the behavior stays closer to the real proxy-exit path and lets you control priority manually.",
+    "aggregationStatusTitle": "Experimental UDP/QUIC aggregation status",
+    "aggregationStatusSummary": "Status: {status}. Requested path: {requested}. Effective path: {effective}. Reason: {reason}",
+    "aggregationDisabledSummary": "Experimental UDP/QUIC aggregation is disabled, so transparent mode stays on the stable single-path balancer.",
+    "aggregationEnabled": "Enable experimental UDP/QUIC aggregation",
+    "aggregationMode": "Experimental aggregation mode",
+    "aggregationModeOptions": {
+      "single_best": "Single Best",
+      "redundant_2": "Redundant 2",
+      "weighted_split": "Weighted Split"
+    },
+    "aggregationSchedulerPolicy": "Scheduler policy",
+    "aggregationSchedulerPolicyOptions": {
+      "single_best": "Single Best",
+      "redundant_2": "Redundant 2",
+      "weighted_split": "Weighted Split"
+    },
+    "aggregationMaxPathsPerSession": "Max paths per session",
+    "aggregationRelayEndpoint": "Relay endpoint",
+    "aggregationRelayEndpointPlaceholder": "For example: https://relay.example/ingress",
+    "aggregationMaxSessionLossPct": "Max session loss (%)",
+    "aggregationMaxPathJitterMs": "Max path jitter (ms)",
+    "aggregationRollbackOnConsecutiveFailures": "Rollback after consecutive failures",
+    "aggregationStatus": {
+      "disabled": "Disabled",
+      "requested": "Requested",
+      "fallback_stable": "Fallback To Stable"
+    },
+    "aggregationPath": {
+      "stable_single_path": "Stable Single Path",
+      "experimental_udp_quic_aggregation": "Experimental UDP/QUIC Aggregation"
+    },
     "routeMode": "Route Decision Mode",
     "routeModeOptions": {
       "strict_proxy": "Strict Proxy Priority",

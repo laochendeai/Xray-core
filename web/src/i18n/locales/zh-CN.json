@@ -475,6 +475,37 @@
     "transparentRoutingWhitelistHint": "域名会写入 webpanel.tun.protectDomains，IP/CIDR 会写入 webpanel.tun.protectCidrs。localhost、内网地址段和常见本地域名仍会保持内置直连；也支持输入 *.example.com，保存时会自动转成 domain:example.com。",
     "remoteDnsGuideTitle": "远端 DNS 怎么配更合适",
     "remoteDnsGuideBody": "这里填的是国外或其他域名要走的远端 DNS。可以填多个，系统会按你填写的顺序全部写入运行时，不再按本地网络测速自动删减。这样更接近代理出口的真实使用场景，也方便你手工控制优先级。",
+    "aggregationStatusTitle": "实验性 UDP/QUIC 聚合状态",
+    "aggregationStatusSummary": "状态: {status}。请求路径: {requested}。当前生效路径: {effective}。原因: {reason}",
+    "aggregationDisabledSummary": "实验性 UDP/QUIC 聚合当前关闭，透明模式继续使用稳定的单路径 balancer。",
+    "aggregationEnabled": "启用实验性 UDP/QUIC 聚合",
+    "aggregationMode": "实验聚合模式",
+    "aggregationModeOptions": {
+      "single_best": "单一路径最佳",
+      "redundant_2": "双路径冗余",
+      "weighted_split": "加权分流"
+    },
+    "aggregationSchedulerPolicy": "调度策略",
+    "aggregationSchedulerPolicyOptions": {
+      "single_best": "单一路径最佳",
+      "redundant_2": "双路径冗余",
+      "weighted_split": "加权分流"
+    },
+    "aggregationMaxPathsPerSession": "单会话最多路径数",
+    "aggregationRelayEndpoint": "Relay 端点",
+    "aggregationRelayEndpointPlaceholder": "例如: https://relay.example/ingress",
+    "aggregationMaxSessionLossPct": "最大会话丢包率(%)",
+    "aggregationMaxPathJitterMs": "最大路径抖动(ms)",
+    "aggregationRollbackOnConsecutiveFailures": "连续失败多少次后回退",
+    "aggregationStatus": {
+      "disabled": "已关闭",
+      "requested": "已请求实验模式",
+      "fallback_stable": "已回退到稳定模式"
+    },
+    "aggregationPath": {
+      "stable_single_path": "稳定单路径",
+      "experimental_udp_quic_aggregation": "实验性 UDP/QUIC 聚合"
+    },
     "routeMode": "分流决策模式",
     "routeModeOptions": {
       "strict_proxy": "严格代理优先",
