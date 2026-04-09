@@ -80,7 +80,66 @@
         <div v-if="tunSettingsForm.routeMode === 'auto_tested'" class="node-pool-meta">
           {{ t('nodePool.routeModeAutoHint') }}
         </div>
+        <n-alert :type="aggregationStatusAlertType" :title="t('nodePool.aggregationStatusTitle')">
+          {{ aggregationStatusSummary }}
+        </n-alert>
         <n-form :model="tunSettingsForm" label-placement="left" label-width="220px">
+          <n-form-item :label="t('nodePool.aggregationEnabled')">
+            <n-switch v-model:value="tunSettingsForm.aggregation.enabled" />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.aggregationMode')">
+            <n-select
+              v-model:value="tunSettingsForm.aggregation.mode"
+              :options="aggregationModeOptions"
+              :disabled="!tunSettingsForm.aggregation.enabled"
+            />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.aggregationSchedulerPolicy')">
+            <n-select
+              v-model:value="tunSettingsForm.aggregation.schedulerPolicy"
+              :options="aggregationSchedulerPolicyOptions"
+              :disabled="!tunSettingsForm.aggregation.enabled"
+            />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.aggregationMaxPathsPerSession')">
+            <n-input-number
+              v-model:value="tunSettingsForm.aggregation.maxPathsPerSession"
+              :min="1"
+              :max="8"
+              :disabled="!tunSettingsForm.aggregation.enabled"
+            />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.aggregationRelayEndpoint')">
+            <n-input
+              v-model:value="tunSettingsForm.aggregation.relayEndpoint"
+              :placeholder="t('nodePool.aggregationRelayEndpointPlaceholder')"
+              :disabled="!tunSettingsForm.aggregation.enabled"
+            />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.aggregationMaxSessionLossPct')">
+            <n-input-number
+              v-model:value="tunSettingsForm.aggregation.health.maxSessionLossPct"
+              :min="1"
+              :max="100"
+              :disabled="!tunSettingsForm.aggregation.enabled"
+            />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.aggregationMaxPathJitterMs')">
+            <n-input-number
+              v-model:value="tunSettingsForm.aggregation.health.maxPathJitterMs"
+              :min="1"
+              :max="5000"
+              :disabled="!tunSettingsForm.aggregation.enabled"
+            />
+          </n-form-item>
+          <n-form-item :label="t('nodePool.aggregationRollbackOnConsecutiveFailures')">
+            <n-input-number
+              v-model:value="tunSettingsForm.aggregation.health.rollbackOnConsecutiveFailures"
+              :min="1"
+              :max="100"
+              :disabled="!tunSettingsForm.aggregation.enabled"
+            />
+          </n-form-item>
           <n-form-item :label="t('nodePool.routeMode')">
             <n-select v-model:value="tunSettingsForm.routeMode" :options="routeModeOptions" />
           </n-form-item>
@@ -894,6 +953,12 @@ import type {
   NodeNetworkType,
   NodeRecord,
   NodeStatus,
+  TunAggregationMode,
+  TunAggregationSchedulerPolicy,
+  TunAggregationSettings,
+  TunAggregationStatus,
+  TunAggregationStatusCode,
+  TunAggregationRuntimePath,
   TunDestinationBinding,
   TunDestinationBindingPreset,
   TunEditableSettings,
@@ -917,6 +982,66 @@ import {
 
 const { t, te } = useI18n()
 const message = useMessage()
+
+function createDefaultAggregationSettings(): TunAggregationSettings {
+  return {
+    enabled: false,
+    mode: 'single_best',
+    maxPathsPerSession: 2,
+    schedulerPolicy: 'weighted_split',
+    relayEndpoint: '',
+    health: {
+      maxSessionLossPct: 5,
+      maxPathJitterMs: 120,
+      rollbackOnConsecutiveFailures: 3
+    }
+  }
+}
+
+function normalizeAggregationSettings(value?: Partial<TunAggregationSettings>): TunAggregationSettings {
+  const base = createDefaultAggregationSettings()
+  const health = value?.health || {}
+  const rawMaxPaths = Number(value?.maxPathsPerSession)
+  return {
+    ...base,
+    ...value,
+    maxPathsPerSession:
+      Number.isFinite(rawMaxPaths) && rawMaxPaths > 0
+        ? Math.min(8, Math.max(1, Math.trunc(rawMaxPaths)))
+        : base.maxPathsPerSession,
+    relayEndpoint: (value?.relayEndpoint || '').trim(),
+    health: {
+      ...base.health,
+      ...health
+    }
+  }
+}
+
+function createDefaultAggregationStatus(): TunAggregationStatus {
+  const defaults = createDefaultAggregationSettings()
+  return {
+    enabled: false,
+    status: 'disabled',
+    requestedPath: 'stable_single_path',
+    effectivePath: 'stable_single_path',
+    ready: false,
+    relayConfigured: false,
+    mode: defaults.mode,
+    maxPathsPerSession: defaults.maxPathsPerSession,
+    schedulerPolicy: defaults.schedulerPolicy,
+    relayEndpoint: '',
+    reason: ''
+  }
+}
+
+function normalizeAggregationStatus(value?: Partial<TunAggregationStatus>): TunAggregationStatus {
+  const base = createDefaultAggregationStatus()
+  return {
+    ...base,
+    ...value,
+    relayEndpoint: (value?.relayEndpoint || '').trim()
+  }
+}
 
 interface DestinationBindingDraft {
   key: string
@@ -1004,7 +1129,8 @@ const tunStatus = ref<TunStatusResponse>({
   remoteDns: [],
   configPath: '',
   xrayBinary: '',
-  message: ''
+  message: '',
+  aggregation: createDefaultAggregationStatus()
 })
 
 const configForm = ref<ValidationConfig>({
@@ -1025,7 +1151,8 @@ const tunSettingsForm = ref<TunEditableSettings>({
   remoteDns: [],
   protectDomains: [],
   protectCidrs: [],
-  destinationBindings: []
+  destinationBindings: [],
+  aggregation: createDefaultAggregationSettings()
 })
 
 const nodes = computed(() => dashboard.value.nodes || [])
@@ -1104,6 +1231,18 @@ const selectionPolicyOptions = computed(() => [
   { label: t('nodePool.selectionPolicyOptions.fastest'), value: 'fastest' as TunSelectionPolicy },
   { label: t('nodePool.selectionPolicyOptions.lowest_latency'), value: 'lowest_latency' as TunSelectionPolicy },
   { label: t('nodePool.selectionPolicyOptions.lowest_fail_rate'), value: 'lowest_fail_rate' as TunSelectionPolicy }
+])
+
+const aggregationModeOptions = computed(() => [
+  { label: t('nodePool.aggregationModeOptions.single_best'), value: 'single_best' as TunAggregationMode },
+  { label: t('nodePool.aggregationModeOptions.redundant_2'), value: 'redundant_2' as TunAggregationMode },
+  { label: t('nodePool.aggregationModeOptions.weighted_split'), value: 'weighted_split' as TunAggregationMode }
+])
+
+const aggregationSchedulerPolicyOptions = computed(() => [
+  { label: t('nodePool.aggregationSchedulerPolicyOptions.single_best'), value: 'single_best' as TunAggregationSchedulerPolicy },
+  { label: t('nodePool.aggregationSchedulerPolicyOptions.redundant_2'), value: 'redundant_2' as TunAggregationSchedulerPolicy },
+  { label: t('nodePool.aggregationSchedulerPolicyOptions.weighted_split'), value: 'weighted_split' as TunAggregationSchedulerPolicy }
 ])
 
 const destinationBindingPresetOptions = computed(() => [
@@ -1242,6 +1381,14 @@ function exitIpStatusLabel(status: NodeExitIPStatus) {
 
 function intelligenceReasonLabel(reason?: string) {
   return translateCode('nodePool.intelligenceReason', reason || 'insufficient_signal')
+}
+
+function aggregationStatusLabel(status?: TunAggregationStatusCode) {
+  return translateCode('nodePool.aggregationStatus', status || 'disabled')
+}
+
+function aggregationPathLabel(path?: TunAggregationRuntimePath) {
+  return translateCode('nodePool.aggregationPath', path || 'stable_single_path')
 }
 
 function statusTagType(status: NodeStatus) {
@@ -1760,7 +1907,8 @@ async function fetchTunSettings() {
     remoteDns: Array.isArray(data.remoteDns) ? data.remoteDns : [],
     protectDomains: Array.isArray(data.protectDomains) ? data.protectDomains : [],
     protectCidrs: Array.isArray(data.protectCidrs) ? data.protectCidrs : [],
-    destinationBindings: Array.isArray(data.destinationBindings) ? data.destinationBindings : []
+    destinationBindings: Array.isArray(data.destinationBindings) ? data.destinationBindings : [],
+    aggregation: normalizeAggregationSettings(data.aggregation)
   }
   syncTunSettingsTextAreas()
   syncDestinationBindingDrafts(tunSettingsForm.value.destinationBindings)
@@ -1774,9 +1922,27 @@ function applyTunStatus(status: TunStatusResponse) {
   tunStatus.value = {
     ...tunStatus.value,
     ...status,
-    diagnostics: Array.isArray(status?.diagnostics) ? status.diagnostics : []
+    diagnostics: Array.isArray(status?.diagnostics) ? status.diagnostics : [],
+    aggregation: normalizeAggregationStatus(status?.aggregation)
   }
 }
+
+const aggregationStatusAlertType = computed(() => {
+  const status = tunStatus.value.aggregation?.status || 'disabled'
+  if (status === 'fallback_stable') return 'warning'
+  if (status === 'requested') return 'info'
+  return 'info'
+})
+
+const aggregationStatusSummary = computed(() => {
+  const aggregation = normalizeAggregationStatus(tunStatus.value.aggregation)
+  return t('nodePool.aggregationStatusSummary', {
+    status: aggregationStatusLabel(aggregation.status),
+    requested: aggregationPathLabel(aggregation.requestedPath),
+    effective: aggregationPathLabel(aggregation.effectivePath),
+    reason: aggregation.reason || t('nodePool.aggregationDisabledSummary')
+  })
+})
 
 async function refreshAll() {
   loading.value = true
@@ -2107,7 +2273,8 @@ async function handleSaveTunSettings() {
       remoteDns: normalizeListInput(tunRemoteDnsText.value),
       protectDomains: normalizeListInput(tunProtectDomainsText.value),
       protectCidrs: normalizeListInput(tunProtectCidrsText.value),
-      destinationBindings: destinationBindingDrafts.value.map(draftToBinding)
+      destinationBindings: destinationBindingDrafts.value.map(draftToBinding),
+      aggregation: normalizeAggregationSettings(tunSettingsForm.value.aggregation)
     })
     tunSettingsForm.value = {
       selectionPolicy: saved.selectionPolicy || 'fastest',
@@ -2115,7 +2282,8 @@ async function handleSaveTunSettings() {
       remoteDns: Array.isArray(saved.remoteDns) ? saved.remoteDns : [],
       protectDomains: Array.isArray(saved.protectDomains) ? saved.protectDomains : [],
       protectCidrs: Array.isArray(saved.protectCidrs) ? saved.protectCidrs : [],
-      destinationBindings: Array.isArray(saved.destinationBindings) ? saved.destinationBindings : []
+      destinationBindings: Array.isArray(saved.destinationBindings) ? saved.destinationBindings : [],
+      aggregation: normalizeAggregationSettings(saved.aggregation)
     }
     syncTunSettingsTextAreas()
     syncDestinationBindingDrafts(tunSettingsForm.value.destinationBindings)

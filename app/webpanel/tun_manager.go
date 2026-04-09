@@ -22,7 +22,18 @@ import (
 var (
 	defaultTunSelectionPolicy = TunSelectionPolicyFastest
 	defaultTunRouteMode       = TunRouteModeStrictProxy
-	defaultTunCIDRs           = []string{
+	defaultTunAggregation     = TunAggregationSettings{
+		Enabled:            false,
+		Mode:               string(TunAggregationModeSingleBest),
+		MaxPathsPerSession: 2,
+		SchedulerPolicy:    string(TunAggregationSchedulerPolicyWeightedSplit),
+		Health: TunAggregationHealthSettings{
+			MaxSessionLossPct:             5,
+			MaxPathJitterMs:               120,
+			RollbackOnConsecutiveFailures: 3,
+		},
+	}
+	defaultTunCIDRs = []string{
 		"127.0.0.0/8",
 		"10.0.0.0/8",
 		"172.16.0.0/12",
@@ -49,6 +60,10 @@ var (
 type TunSelectionPolicy string
 type TunRouteMode string
 type TunDestinationBindingPreset string
+type TunAggregationMode string
+type TunAggregationSchedulerPolicy string
+type TunAggregationRuntimePath string
+type TunAggregationStatusCode string
 
 const (
 	TunSelectionPolicyFastest        TunSelectionPolicy = "fastest"
@@ -68,6 +83,29 @@ const (
 )
 
 const (
+	TunAggregationModeSingleBest    TunAggregationMode = "single_best"
+	TunAggregationModeRedundant2    TunAggregationMode = "redundant_2"
+	TunAggregationModeWeightedSplit TunAggregationMode = "weighted_split"
+)
+
+const (
+	TunAggregationSchedulerPolicySingleBest    TunAggregationSchedulerPolicy = "single_best"
+	TunAggregationSchedulerPolicyRedundant2    TunAggregationSchedulerPolicy = "redundant_2"
+	TunAggregationSchedulerPolicyWeightedSplit TunAggregationSchedulerPolicy = "weighted_split"
+)
+
+const (
+	TunAggregationPathStableSinglePath               TunAggregationRuntimePath = "stable_single_path"
+	TunAggregationPathExperimentalUDPQUICAggregation TunAggregationRuntimePath = "experimental_udp_quic_aggregation"
+)
+
+const (
+	TunAggregationStatusDisabled       TunAggregationStatusCode = "disabled"
+	TunAggregationStatusRequested      TunAggregationStatusCode = "requested"
+	TunAggregationStatusFallbackStable TunAggregationStatusCode = "fallback_stable"
+)
+
+const (
 	tunLowestFailRateSubsetSize = 3
 	tunDirectProbeTimeout       = 1200 * time.Millisecond
 	tunDirectProbeCacheTTL      = 6 * time.Hour
@@ -78,6 +116,7 @@ const (
 	tunPublicEgressCacheTTL     = 6 * time.Hour
 	tunPublicEgressCacheVersion = 1
 	tunPublicEgressCacheFile    = "egress-probe-cache.json"
+	tunAggregationRuntimeFile   = "aggregation-runtime.json"
 )
 
 var tunDestinationBindingPresetDomains = map[TunDestinationBindingPreset][]string{
@@ -111,6 +150,35 @@ type TunDestinationBinding struct {
 	NodeID  string   `json:"nodeId"`
 }
 
+type TunAggregationHealthSettings struct {
+	MaxSessionLossPct             int `json:"maxSessionLossPct"`
+	MaxPathJitterMs               int `json:"maxPathJitterMs"`
+	RollbackOnConsecutiveFailures int `json:"rollbackOnConsecutiveFailures"`
+}
+
+type TunAggregationSettings struct {
+	Enabled            bool                         `json:"enabled"`
+	Mode               string                       `json:"mode"`
+	MaxPathsPerSession int                          `json:"maxPathsPerSession"`
+	SchedulerPolicy    string                       `json:"schedulerPolicy"`
+	RelayEndpoint      string                       `json:"relayEndpoint"`
+	Health             TunAggregationHealthSettings `json:"health"`
+}
+
+type TunAggregationStatus struct {
+	Enabled            bool   `json:"enabled"`
+	Status             string `json:"status"`
+	RequestedPath      string `json:"requestedPath"`
+	EffectivePath      string `json:"effectivePath"`
+	Ready              bool   `json:"ready"`
+	RelayConfigured    bool   `json:"relayConfigured"`
+	Mode               string `json:"mode"`
+	MaxPathsPerSession int    `json:"maxPathsPerSession"`
+	SchedulerPolicy    string `json:"schedulerPolicy"`
+	RelayEndpoint      string `json:"relayEndpoint,omitempty"`
+	Reason             string `json:"reason"`
+}
+
 type TunFeatureSettings struct {
 	BinaryPath          string                  `json:"binaryPath"`
 	HelperPath          string                  `json:"helperPath"`
@@ -126,6 +194,7 @@ type TunFeatureSettings struct {
 	ProtectCIDRs        []string                `json:"protectCidrs"`
 	ProtectDomains      []string                `json:"protectDomains"`
 	DestinationBindings []TunDestinationBinding `json:"destinationBindings,omitempty"`
+	Aggregation         TunAggregationSettings  `json:"aggregation,omitempty"`
 }
 
 type TunEditableSettings struct {
@@ -135,6 +204,7 @@ type TunEditableSettings struct {
 	ProtectCIDRs        []string                `json:"protectCidrs"`
 	ProtectDomains      []string                `json:"protectDomains"`
 	DestinationBindings []TunDestinationBinding `json:"destinationBindings,omitempty"`
+	Aggregation         TunAggregationSettings  `json:"aggregation,omitempty"`
 }
 
 type TunRoutingDiagnostic struct {
@@ -210,6 +280,7 @@ type TunStatus struct {
 	Diagnostics                 []string               `json:"diagnostics,omitempty"`
 	DirectEgress                *TunEgressObservation  `json:"directEgress,omitempty"`
 	ProxyEgress                 *TunEgressObservation  `json:"proxyEgress,omitempty"`
+	Aggregation                 *TunAggregationStatus  `json:"aggregation,omitempty"`
 	RoutingDiagnostics          []TunRoutingDiagnostic `json:"routingDiagnostics,omitempty"`
 	MachineState                MachineState           `json:"machineState,omitempty"`
 	LastStateReason             MachineStateReason     `json:"lastStateReason,omitempty"`
@@ -681,6 +752,7 @@ func (m *TunManager) loadSettings() (*TunFeatureSettings, error) {
 	settings.ProtectCIDRs = uniqStrings(append(append([]string{}, defaultTunCIDRs...), settings.ProtectCIDRs...))
 	settings.ProtectDomains = normalizeTunDomainRules(append(append([]string{}, defaultTunDomains...), settings.ProtectDomains...))
 	settings.DestinationBindings = normalizeTunDestinationBindings(settings.DestinationBindings)
+	settings.Aggregation = normalizeTunAggregationSettings(settings.Aggregation)
 
 	return settings, nil
 }
@@ -754,6 +826,8 @@ func (m *TunManager) UpdateEditableSettings(next TunEditableSettings) (*TunEdita
 		delete(tun, "destinationBindings")
 	}
 
+	tun["aggregation"] = tunAggregationSettingsToAny(normalizeTunAggregationSettings(next.Aggregation))
+
 	webpanel["tun"] = tun
 	config["webpanel"] = webpanel
 
@@ -782,6 +856,7 @@ func (m *TunManager) loadEditableSettingsLocked() (*TunEditableSettings, error) 
 		SelectionPolicy: string(defaultTunSelectionPolicy),
 		RouteMode:       string(defaultTunRouteMode),
 		RemoteDNS:       append([]string{}, defaultTunDNS...),
+		Aggregation:     normalizeTunAggregationSettings(TunAggregationSettings{}),
 	}
 	if tun == nil {
 		return settings, nil
@@ -799,6 +874,7 @@ func (m *TunManager) loadEditableSettingsLocked() (*TunEditableSettings, error) 
 	settings.ProtectDomains = normalizeTunDomainRules(stringSliceFromAny(tun["protectDomains"]))
 	settings.ProtectCIDRs = uniqStrings(stringSliceFromAny(tun["protectCidrs"]))
 	settings.DestinationBindings = normalizeTunDestinationBindings(tunDestinationBindingsFromAny(tun["destinationBindings"]))
+	settings.Aggregation = tunAggregationSettingsFromAny(tun["aggregation"])
 
 	return settings, nil
 }
@@ -844,6 +920,8 @@ func (m *TunManager) inspectLocked(settings *TunFeatureSettings) *TunStatus {
 	if normalizeTunRouteMode(settings.RouteMode) == TunRouteModeAutoTested {
 		status.Diagnostics = append(status.Diagnostics, "Auto-tested split routing will probe base direct rules before enabling transparent mode; the first start or stale cache refresh can take longer.")
 	}
+	status.Aggregation = buildTunAggregationStatus(settings)
+	appendUniqueTunDiagnostic(status, formatTunAggregationDiagnostic(status.Aggregation))
 
 	if _, err := os.Stat(settings.HelperPath); err == nil {
 		status.HelperExists = true
@@ -1178,7 +1256,32 @@ func (m *TunManager) generateRuntimeConfigLocked(settings *TunFeatureSettings, a
 	if err := os.WriteFile(settings.RuntimeConfigPath, runtimeConfig, 0644); err != nil {
 		return fmt.Errorf("write runtime config: %w", err)
 	}
+	if err := writeTunAggregationRuntimeState(settings); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func writeTunAggregationRuntimeState(settings *TunFeatureSettings) error {
+	if settings == nil {
+		return nil
+	}
+
+	runtimeState := buildTunAggregationStatus(settings)
+	if runtimeState == nil {
+		return nil
+	}
+
+	raw, err := json.MarshalIndent(runtimeState, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode aggregation runtime state: %w", err)
+	}
+
+	outputPath := filepath.Join(settings.StateDir, tunAggregationRuntimeFile)
+	if err := os.WriteFile(outputPath, raw, 0o644); err != nil {
+		return fmt.Errorf("write aggregation runtime state: %w", err)
+	}
 	return nil
 }
 
@@ -1613,6 +1716,162 @@ func normalizeTunRouteMode(value string) TunRouteMode {
 	default:
 		return TunRouteModeStrictProxy
 	}
+}
+
+func normalizeTunAggregationMode(value string) TunAggregationMode {
+	switch TunAggregationMode(strings.ToLower(strings.TrimSpace(value))) {
+	case TunAggregationModeRedundant2:
+		return TunAggregationModeRedundant2
+	case TunAggregationModeWeightedSplit:
+		return TunAggregationModeWeightedSplit
+	default:
+		return TunAggregationModeSingleBest
+	}
+}
+
+func normalizeTunAggregationSchedulerPolicy(value string) TunAggregationSchedulerPolicy {
+	switch TunAggregationSchedulerPolicy(strings.ToLower(strings.TrimSpace(value))) {
+	case TunAggregationSchedulerPolicySingleBest:
+		return TunAggregationSchedulerPolicySingleBest
+	case TunAggregationSchedulerPolicyRedundant2:
+		return TunAggregationSchedulerPolicyRedundant2
+	default:
+		return TunAggregationSchedulerPolicyWeightedSplit
+	}
+}
+
+func normalizeTunAggregationHealthSettings(settings TunAggregationHealthSettings) TunAggregationHealthSettings {
+	normalized := settings
+	if normalized.MaxSessionLossPct <= 0 {
+		normalized.MaxSessionLossPct = defaultTunAggregation.Health.MaxSessionLossPct
+	}
+	if normalized.MaxPathJitterMs <= 0 {
+		normalized.MaxPathJitterMs = defaultTunAggregation.Health.MaxPathJitterMs
+	}
+	if normalized.RollbackOnConsecutiveFailures <= 0 {
+		normalized.RollbackOnConsecutiveFailures = defaultTunAggregation.Health.RollbackOnConsecutiveFailures
+	}
+	return normalized
+}
+
+func normalizeTunAggregationSettings(settings TunAggregationSettings) TunAggregationSettings {
+	normalized := defaultTunAggregation
+	normalized.Enabled = settings.Enabled
+	if strings.TrimSpace(settings.Mode) != "" {
+		normalized.Mode = string(normalizeTunAggregationMode(settings.Mode))
+	}
+	if settings.MaxPathsPerSession > 0 {
+		normalized.MaxPathsPerSession = settings.MaxPathsPerSession
+	}
+	if normalized.MaxPathsPerSession < 1 {
+		normalized.MaxPathsPerSession = 1
+	}
+	if normalized.MaxPathsPerSession > 8 {
+		normalized.MaxPathsPerSession = 8
+	}
+	if strings.TrimSpace(settings.SchedulerPolicy) != "" {
+		normalized.SchedulerPolicy = string(normalizeTunAggregationSchedulerPolicy(settings.SchedulerPolicy))
+	}
+	normalized.RelayEndpoint = strings.TrimSpace(settings.RelayEndpoint)
+	normalized.Health = normalizeTunAggregationHealthSettings(settings.Health)
+	return normalized
+}
+
+func tunAggregationSettingsFromAny(raw interface{}) TunAggregationSettings {
+	if raw == nil {
+		return normalizeTunAggregationSettings(TunAggregationSettings{})
+	}
+
+	switch typed := raw.(type) {
+	case TunAggregationSettings:
+		return normalizeTunAggregationSettings(typed)
+	default:
+		payload, err := json.Marshal(raw)
+		if err != nil {
+			return normalizeTunAggregationSettings(TunAggregationSettings{})
+		}
+		var settings TunAggregationSettings
+		if err := json.Unmarshal(payload, &settings); err != nil {
+			return normalizeTunAggregationSettings(TunAggregationSettings{})
+		}
+		return normalizeTunAggregationSettings(settings)
+	}
+}
+
+func tunAggregationSettingsToAny(settings TunAggregationSettings) map[string]interface{} {
+	normalized := normalizeTunAggregationSettings(settings)
+	return map[string]interface{}{
+		"enabled":            normalized.Enabled,
+		"mode":               normalized.Mode,
+		"maxPathsPerSession": normalized.MaxPathsPerSession,
+		"schedulerPolicy":    normalized.SchedulerPolicy,
+		"relayEndpoint":      normalized.RelayEndpoint,
+		"health": map[string]interface{}{
+			"maxSessionLossPct":             normalized.Health.MaxSessionLossPct,
+			"maxPathJitterMs":               normalized.Health.MaxPathJitterMs,
+			"rollbackOnConsecutiveFailures": normalized.Health.RollbackOnConsecutiveFailures,
+		},
+	}
+}
+
+func buildTunAggregationStatus(settings *TunFeatureSettings) *TunAggregationStatus {
+	if settings == nil {
+		return nil
+	}
+
+	aggregation := normalizeTunAggregationSettings(settings.Aggregation)
+	requestedPath := string(TunAggregationPathStableSinglePath)
+	if aggregation.Enabled {
+		requestedPath = string(TunAggregationPathExperimentalUDPQUICAggregation)
+	}
+
+	status := &TunAggregationStatus{
+		Enabled:            aggregation.Enabled,
+		Status:             string(TunAggregationStatusDisabled),
+		RequestedPath:      requestedPath,
+		EffectivePath:      string(TunAggregationPathStableSinglePath),
+		Ready:              false,
+		RelayConfigured:    false,
+		Mode:               aggregation.Mode,
+		MaxPathsPerSession: aggregation.MaxPathsPerSession,
+		SchedulerPolicy:    aggregation.SchedulerPolicy,
+		RelayEndpoint:      aggregation.RelayEndpoint,
+		Reason:             "Experimental UDP/QUIC aggregation is disabled, so transparent mode stays on the stable single-path balancer.",
+	}
+
+	if !aggregation.Enabled {
+		return status
+	}
+
+	if aggregation.RelayEndpoint == "" {
+		status.Status = string(TunAggregationStatusFallbackStable)
+		status.Reason = "Experimental UDP/QUIC aggregation is enabled, but relayEndpoint is empty, so the runtime falls back to stable single-path mode."
+		return status
+	}
+
+	status.Status = string(TunAggregationStatusRequested)
+	status.Ready = true
+	status.RelayConfigured = true
+	status.Reason = "Experimental UDP/QUIC aggregation is configured behind the feature flag. Stage-one scaffolding keeps the effective path on stable single-path mode until the local scheduler and relay prototypes land."
+	return status
+}
+
+func formatTunAggregationDiagnostic(status *TunAggregationStatus) string {
+	if status == nil {
+		return ""
+	}
+
+	return fmt.Sprintf(
+		"Aggregation mode [%s]: requested=%s effective=%s mode=%s scheduler=%s maxPaths=%d relayConfigured=%t reason=%s",
+		status.Status,
+		status.RequestedPath,
+		status.EffectivePath,
+		status.Mode,
+		status.SchedulerPolicy,
+		status.MaxPathsPerSession,
+		status.RelayConfigured,
+		status.Reason,
+	)
 }
 
 func normalizeTunDestinationBindingPreset(value string) TunDestinationBindingPreset {

@@ -273,6 +273,9 @@ webpanel_capture_snapshot() {
   if [[ -f "$WEBPANEL_RUNTIME_CONFIG_PATH" ]]; then
     cp "$WEBPANEL_RUNTIME_CONFIG_PATH" "$snapshot_dir/runtime-config.json"
   fi
+  if [[ -f "$WEBPANEL_STATE_DIR/aggregation-runtime.json" ]]; then
+    cp "$WEBPANEL_STATE_DIR/aggregation-runtime.json" "$snapshot_dir/aggregation-runtime.json"
+  fi
   if [[ -f "$WEBPANEL_STATE_DIR/route-probe-cache.json" ]]; then
     cp "$WEBPANEL_STATE_DIR/route-probe-cache.json" "$snapshot_dir/route-probe-cache.json"
   fi

@@ -290,6 +290,40 @@ export interface TunEgressObservation {
   error?: string
 }
 
+export type TunAggregationMode = 'single_best' | 'redundant_2' | 'weighted_split'
+export type TunAggregationSchedulerPolicy = 'single_best' | 'redundant_2' | 'weighted_split'
+export type TunAggregationStatusCode = 'disabled' | 'requested' | 'fallback_stable'
+export type TunAggregationRuntimePath = 'stable_single_path' | 'experimental_udp_quic_aggregation'
+
+export interface TunAggregationHealthSettings {
+  maxSessionLossPct: number
+  maxPathJitterMs: number
+  rollbackOnConsecutiveFailures: number
+}
+
+export interface TunAggregationSettings {
+  enabled: boolean
+  mode: TunAggregationMode
+  maxPathsPerSession: number
+  schedulerPolicy: TunAggregationSchedulerPolicy
+  relayEndpoint: string
+  health: TunAggregationHealthSettings
+}
+
+export interface TunAggregationStatus {
+  enabled: boolean
+  status: TunAggregationStatusCode
+  requestedPath: TunAggregationRuntimePath
+  effectivePath: TunAggregationRuntimePath
+  ready: boolean
+  relayConfigured: boolean
+  mode: TunAggregationMode
+  maxPathsPerSession: number
+  schedulerPolicy: TunAggregationSchedulerPolicy
+  relayEndpoint?: string
+  reason: string
+}
+
 export interface TunStatusResponse {
   status: string
   running: boolean
@@ -315,6 +349,7 @@ export interface TunStatusResponse {
   diagnostics?: string[]
   directEgress?: TunEgressObservation
   proxyEgress?: TunEgressObservation
+  aggregation?: TunAggregationStatus
   machineState?: MachineState
   lastStateReason?: MachineStateReason
   lastStateChangedAt?: string
@@ -338,4 +373,5 @@ export interface TunEditableSettings {
   protectDomains: string[]
   protectCidrs: string[]
   destinationBindings: TunDestinationBinding[]
+  aggregation: TunAggregationSettings
 }
