@@ -411,6 +411,85 @@ func TestSubscriptionManagerHandleProbeResultsStoresNodeExitIPError(t *testing.T
 	}, "node exit IP probe error")
 }
 
+func TestSubscriptionManagerRunNodeIntelligenceRefreshStoresVerdicts(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	statePath := filepath.Join(tempDir, "node_pool_state.json")
+	sm := NewSubscriptionManager(configPath, nil, nil, nil)
+	sm.nodeIntelligenceLookup = func(context.Context, string) nodeIPConnectionLookupResult {
+		return nodeIPConnectionLookupResult{
+			ASN:       7922,
+			Org:       "Comcast Cable Communications, LLC",
+			ISP:       "Comcast Cable Communications, LLC",
+			Domain:    "comcast.net",
+			CheckedAt: time.Now().UTC(),
+		}
+	}
+	defer sm.Stop()
+
+	sm.mu.Lock()
+	sm.state.ValidationConfig.MinSamples = 5
+	sm.state.Nodes = []NodeRecord{
+		{
+			ID:                    "node-intel-success",
+			URI:                   "vmess://example",
+			Remark:                "intel",
+			Status:                NodeStatusActive,
+			StatusReason:          TransitionReasonManualPromote,
+			SubscriptionID:        "sub-1",
+			AddedAt:               time.Now().Add(-time.Minute),
+			OutboundTag:           probeOutboundTag("node-intel-success"),
+			Cleanliness:           CleanlinessUnknown,
+			CleanlinessConfidence: NodeIntelligenceConfidenceUnknown,
+			BandwidthTier:         BandwidthTierUnknown,
+			ExitIPStatus:          NodeExitIPStatusAvailable,
+			ExitIP:                "198.51.100.40",
+			ExitIPCheckedAt:       timePtr(time.Now().UTC()),
+			NetworkType:           NodeNetworkTypeUnknown,
+			NetworkTypeConfidence: NodeIntelligenceConfidenceUnknown,
+			TotalPings:            12,
+			FailedPings:           0,
+			AvgDelayMs:            180,
+			ConsecutiveFails:      0,
+		},
+	}
+	sm.mu.Unlock()
+
+	sm.runNodeIntelligenceRefresh(probeOutboundTag("node-intel-success"), "198.51.100.40")
+
+	nodes := sm.ListNodes("")
+	if len(nodes) != 1 {
+		t.Fatalf("expected one node, got %d", len(nodes))
+	}
+	if nodes[0].NetworkType != NodeNetworkTypeResidentialLikely {
+		t.Fatalf("expected residential-likely network type, got %q", nodes[0].NetworkType)
+	}
+	if nodes[0].Cleanliness != CleanlinessTrusted {
+		t.Fatalf("expected trusted cleanliness, got %q", nodes[0].Cleanliness)
+	}
+	if nodes[0].CleanlinessReason == "" || nodes[0].NetworkTypeReason == "" {
+		t.Fatalf("expected persisted intelligence reasons, got %#v", nodes[0])
+	}
+
+	sm.mu.Lock()
+	sm.writeStateLocked()
+	sm.mu.Unlock()
+
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+	var persisted NodePoolState
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("decode persisted state: %v", err)
+	}
+	if len(persisted.Nodes) != 1 || persisted.Nodes[0].Cleanliness != CleanlinessTrusted || persisted.Nodes[0].NetworkType != NodeNetworkTypeResidentialLikely {
+		t.Fatalf("unexpected persisted intelligence state: %#v", persisted.Nodes)
+	}
+}
+
 func TestSubscriptionManagerDoesNotRequalifyQuarantineNodeOnFailedProbe(t *testing.T) {
 	t.Parallel()
 
