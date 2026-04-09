@@ -183,33 +183,43 @@ type SubscriptionUpdateInput struct {
 
 // NodeRecord represents a node in the pool.
 type NodeRecord struct {
-	ID                  string            `json:"id"`
-	URI                 string            `json:"uri"`
-	Remark              string            `json:"remark"`
-	Protocol            string            `json:"protocol"`
-	Address             string            `json:"address"`
-	Port                int               `json:"port"`
-	OutboundTag         string            `json:"outboundTag"`
-	Status              NodeStatus        `json:"status"`
-	StatusReason        TransitionReason  `json:"statusReason"`
-	SubscriptionMissing bool              `json:"subscriptionMissing,omitempty"`
-	SubscriptionID      string            `json:"subscriptionId"`
-	AddedAt             time.Time         `json:"addedAt"`
-	PromotedAt          *time.Time        `json:"promotedAt,omitempty"`
-	StatusUpdatedAt     *time.Time        `json:"statusUpdatedAt,omitempty"`
-	LastEventAt         *time.Time        `json:"lastEventAt,omitempty"`
-	TotalPings          int               `json:"totalPings"`
-	FailedPings         int               `json:"failedPings"`
-	AvgDelayMs          int64             `json:"avgDelayMs"`
-	ConsecutiveFails    int               `json:"consecutiveFails"`
-	LastCheckedAt       *time.Time        `json:"lastCheckedAt,omitempty"`
-	Cleanliness         CleanlinessStatus `json:"cleanliness"`
-	BandwidthTier       BandwidthTier     `json:"bandwidthTier"`
-	ExitIPStatus        NodeExitIPStatus  `json:"exitIpStatus"`
-	ExitIP              string            `json:"exitIp,omitempty"`
-	ExitIPSource        string            `json:"exitIpSource,omitempty"`
-	ExitIPError         string            `json:"exitIpError,omitempty"`
-	ExitIPCheckedAt     *time.Time        `json:"exitIpCheckedAt,omitempty"`
+	ID                    string                     `json:"id"`
+	URI                   string                     `json:"uri"`
+	Remark                string                     `json:"remark"`
+	Protocol              string                     `json:"protocol"`
+	Address               string                     `json:"address"`
+	Port                  int                        `json:"port"`
+	OutboundTag           string                     `json:"outboundTag"`
+	Status                NodeStatus                 `json:"status"`
+	StatusReason          TransitionReason           `json:"statusReason"`
+	SubscriptionMissing   bool                       `json:"subscriptionMissing,omitempty"`
+	SubscriptionID        string                     `json:"subscriptionId"`
+	AddedAt               time.Time                  `json:"addedAt"`
+	PromotedAt            *time.Time                 `json:"promotedAt,omitempty"`
+	StatusUpdatedAt       *time.Time                 `json:"statusUpdatedAt,omitempty"`
+	LastEventAt           *time.Time                 `json:"lastEventAt,omitempty"`
+	TotalPings            int                        `json:"totalPings"`
+	FailedPings           int                        `json:"failedPings"`
+	AvgDelayMs            int64                      `json:"avgDelayMs"`
+	ConsecutiveFails      int                        `json:"consecutiveFails"`
+	LastCheckedAt         *time.Time                 `json:"lastCheckedAt,omitempty"`
+	Cleanliness           CleanlinessStatus          `json:"cleanliness"`
+	CleanlinessReason     string                     `json:"cleanlinessReason,omitempty"`
+	CleanlinessDetail     string                     `json:"cleanlinessDetail,omitempty"`
+	CleanlinessConfidence NodeIntelligenceConfidence `json:"cleanlinessConfidence"`
+	BandwidthTier         BandwidthTier              `json:"bandwidthTier"`
+	ExitIPStatus          NodeExitIPStatus           `json:"exitIpStatus"`
+	ExitIP                string                     `json:"exitIp,omitempty"`
+	ExitIPSource          string                     `json:"exitIpSource,omitempty"`
+	ExitIPError           string                     `json:"exitIpError,omitempty"`
+	ExitIPCheckedAt       *time.Time                 `json:"exitIpCheckedAt,omitempty"`
+	NetworkType           NodeNetworkType            `json:"networkType"`
+	NetworkTypeReason     string                     `json:"networkTypeReason,omitempty"`
+	NetworkTypeDetail     string                     `json:"networkTypeDetail,omitempty"`
+	NetworkTypeConfidence NodeIntelligenceConfidence `json:"networkTypeConfidence"`
+	IntelligenceExitIP    string                     `json:"intelligenceExitIp,omitempty"`
+	IntelligenceCheckedAt *time.Time                 `json:"intelligenceCheckedAt,omitempty"`
+	IntelligenceError     string                     `json:"intelligenceError,omitempty"`
 }
 
 // ValidationConfig holds the criteria for promoting/quarantining nodes.
@@ -227,37 +237,43 @@ type ValidationConfig struct {
 
 // SubscriptionManager manages subscriptions and the node pool lifecycle.
 type SubscriptionManager struct {
-	mu                  sync.RWMutex
-	state               *NodePoolState
-	statePath           string
-	grpcClient          *GRPCClient
-	prober              *NodeProber
-	instance            *core.Instance
-	runtimeCtx          context.Context
-	stopCh              chan struct{}
-	refreshMu           sync.Mutex
-	saveCh              chan struct{}
-	saveDelay           time.Duration
-	onPoolHealthChange  func(PoolHealthSummary)
-	bgWG                sync.WaitGroup
-	started             bool
-	dispatcherAvailable bool
-	dispatcher          routing.Dispatcher
-	nodeExitIPProber    nodeExitIPProbeFunc
-	nodeExitIPProbeTTL  time.Duration
-	nodeExitIPErrorTTL  time.Duration
-	nodeExitIPInFlight  map[string]struct{}
+	mu                       sync.RWMutex
+	state                    *NodePoolState
+	statePath                string
+	grpcClient               *GRPCClient
+	prober                   *NodeProber
+	instance                 *core.Instance
+	runtimeCtx               context.Context
+	stopCh                   chan struct{}
+	refreshMu                sync.Mutex
+	saveCh                   chan struct{}
+	saveDelay                time.Duration
+	onPoolHealthChange       func(PoolHealthSummary)
+	bgWG                     sync.WaitGroup
+	started                  bool
+	dispatcherAvailable      bool
+	dispatcher               routing.Dispatcher
+	nodeExitIPProber         nodeExitIPProbeFunc
+	nodeExitIPProbeTTL       time.Duration
+	nodeExitIPErrorTTL       time.Duration
+	nodeExitIPInFlight       map[string]struct{}
+	nodeIntelligenceLookup   nodeIPConnectionLookupFunc
+	nodeIntelligenceTTL      time.Duration
+	nodeIntelligenceErrorTTL time.Duration
+	nodeIntelligenceInFlight map[string]struct{}
 }
 
 const (
-	nodeEventLimit         = 25
-	scheduledPersistDelay  = 350 * time.Millisecond
-	nodeProbeTagPrefix     = "pool_"
-	legacyDemotedStatus    = "demoted"
-	legacyStagingTagPrefix = "staging_"
-	legacyActiveTagPrefix  = "active_"
-	nodeExitIPProbeTTL     = 6 * time.Hour
-	nodeExitIPErrorTTL     = 15 * time.Minute
+	nodeEventLimit           = 25
+	scheduledPersistDelay    = 350 * time.Millisecond
+	nodeProbeTagPrefix       = "pool_"
+	legacyDemotedStatus      = "demoted"
+	legacyStagingTagPrefix   = "staging_"
+	legacyActiveTagPrefix    = "active_"
+	nodeExitIPProbeTTL       = 6 * time.Hour
+	nodeExitIPErrorTTL       = 15 * time.Minute
+	nodeIntelligenceTTL      = 24 * time.Hour
+	nodeIntelligenceErrorTTL = 1 * time.Hour
 )
 
 // NewSubscriptionManager creates a new SubscriptionManager.
@@ -265,17 +281,21 @@ func NewSubscriptionManager(configPath string, grpcClient *GRPCClient, instance 
 	statePath := filepath.Join(filepath.Dir(configPath), "node_pool_state.json")
 
 	sm := &SubscriptionManager{
-		statePath:          statePath,
-		grpcClient:         grpcClient,
-		instance:           instance,
-		runtimeCtx:         runtimeCtx,
-		stopCh:             make(chan struct{}),
-		saveCh:             make(chan struct{}, 1),
-		saveDelay:          scheduledPersistDelay,
-		nodeExitIPProber:   defaultNodeExitIPProber,
-		nodeExitIPProbeTTL: nodeExitIPProbeTTL,
-		nodeExitIPErrorTTL: nodeExitIPErrorTTL,
-		nodeExitIPInFlight: make(map[string]struct{}),
+		statePath:                statePath,
+		grpcClient:               grpcClient,
+		instance:                 instance,
+		runtimeCtx:               runtimeCtx,
+		stopCh:                   make(chan struct{}),
+		saveCh:                   make(chan struct{}, 1),
+		saveDelay:                scheduledPersistDelay,
+		nodeExitIPProber:         defaultNodeExitIPProber,
+		nodeExitIPProbeTTL:       nodeExitIPProbeTTL,
+		nodeExitIPErrorTTL:       nodeExitIPErrorTTL,
+		nodeExitIPInFlight:       make(map[string]struct{}),
+		nodeIntelligenceLookup:   defaultNodeIPConnectionLookup,
+		nodeIntelligenceTTL:      nodeIntelligenceTTL,
+		nodeIntelligenceErrorTTL: nodeIntelligenceErrorTTL,
+		nodeIntelligenceInFlight: make(map[string]struct{}),
 	}
 
 	state, changed := sm.loadState()
@@ -341,6 +361,7 @@ func (sm *SubscriptionManager) Start() error {
 	now := time.Now()
 	for idx := range sm.state.Nodes {
 		sm.maybeScheduleNodeExitIPProbeLocked(idx, now)
+		sm.maybeScheduleNodeIntelligenceRefreshLocked(idx, now)
 	}
 	sm.mu.Unlock()
 
@@ -1456,6 +1477,134 @@ func (sm *SubscriptionManager) runNodeExitIPProbe(tag string) {
 	if applyNodeExitIPProbeResult(&sm.state.Nodes[idx], result) {
 		sm.requestScheduledSave()
 	}
+	sm.maybeScheduleNodeIntelligenceRefreshLocked(idx, time.Now())
+}
+
+func (sm *SubscriptionManager) maybeScheduleNodeIntelligenceRefreshLocked(idx int, now time.Time) {
+	if idx < 0 || idx >= len(sm.state.Nodes) || sm.nodeIntelligenceLookup == nil {
+		return
+	}
+
+	node := sm.state.Nodes[idx]
+	if node.ExitIPStatus != NodeExitIPStatusAvailable || strings.TrimSpace(node.ExitIP) == "" || strings.TrimSpace(node.OutboundTag) == "" {
+		return
+	}
+	if _, ok := sm.nodeIntelligenceInFlight[node.OutboundTag]; ok {
+		return
+	}
+
+	if node.IntelligenceExitIP == node.ExitIP && node.IntelligenceCheckedAt != nil {
+		if node.IntelligenceError == "" && now.Sub(*node.IntelligenceCheckedAt) < sm.nodeIntelligenceTTL {
+			return
+		}
+		if node.IntelligenceError != "" && now.Sub(*node.IntelligenceCheckedAt) < sm.nodeIntelligenceErrorTTL {
+			return
+		}
+	}
+
+	sm.nodeIntelligenceInFlight[node.OutboundTag] = struct{}{}
+	tag := node.OutboundTag
+	exitIP := node.ExitIP
+	sm.bgWG.Add(1)
+	go func() {
+		defer sm.bgWG.Done()
+		sm.runNodeIntelligenceRefresh(tag, exitIP)
+	}()
+}
+
+func (sm *SubscriptionManager) runNodeIntelligenceRefresh(tag string, exitIP string) {
+	if strings.TrimSpace(tag) == "" || strings.TrimSpace(exitIP) == "" {
+		return
+	}
+
+	lookup := nodeIPConnectionLookupResult{
+		CheckedAt: time.Now().UTC(),
+		Error:     "node intelligence lookup is unavailable",
+	}
+	if sm.nodeIntelligenceLookup != nil {
+		lookup = sm.nodeIntelligenceLookup(context.Background(), exitIP)
+		if lookup.CheckedAt.IsZero() {
+			lookup.CheckedAt = time.Now().UTC()
+		}
+	}
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	delete(sm.nodeIntelligenceInFlight, tag)
+
+	idx := sm.findNodeByTag(tag)
+	if idx < 0 {
+		return
+	}
+
+	node := &sm.state.Nodes[idx]
+	if node.ExitIPStatus != NodeExitIPStatusAvailable || node.ExitIP != exitIP {
+		return
+	}
+
+	result := classifyNodeIntelligence(*node, sm.state.ValidationConfig, lookup)
+	if applyNodeIntelligenceResult(node, result) {
+		sm.requestScheduledSave()
+	}
+}
+
+func applyNodeIntelligenceResult(node *NodeRecord, result nodeIntelligenceResult) bool {
+	if node == nil {
+		return false
+	}
+
+	changed := false
+	if node.Cleanliness != result.Cleanliness {
+		node.Cleanliness = result.Cleanliness
+		changed = true
+	}
+	if node.CleanlinessReason != result.CleanlinessReason {
+		node.CleanlinessReason = result.CleanlinessReason
+		changed = true
+	}
+	if node.CleanlinessDetail != result.CleanlinessDetail {
+		node.CleanlinessDetail = result.CleanlinessDetail
+		changed = true
+	}
+	if node.CleanlinessConfidence != result.CleanlinessConfidence {
+		node.CleanlinessConfidence = result.CleanlinessConfidence
+		changed = true
+	}
+	if node.NetworkType != result.NetworkType {
+		node.NetworkType = result.NetworkType
+		changed = true
+	}
+	if node.NetworkTypeReason != result.NetworkReason {
+		node.NetworkTypeReason = result.NetworkReason
+		changed = true
+	}
+	if node.NetworkTypeDetail != result.NetworkDetail {
+		node.NetworkTypeDetail = result.NetworkDetail
+		changed = true
+	}
+	if node.NetworkTypeConfidence != result.NetworkConfidence {
+		node.NetworkTypeConfidence = result.NetworkConfidence
+		changed = true
+	}
+	if node.IntelligenceExitIP != result.ExitIP {
+		node.IntelligenceExitIP = result.ExitIP
+		changed = true
+	}
+	if node.IntelligenceError != result.Error {
+		node.IntelligenceError = result.Error
+		changed = true
+	}
+
+	checkedAt := result.CheckedAt
+	if checkedAt.IsZero() {
+		checkedAt = time.Now().UTC()
+	}
+	if node.IntelligenceCheckedAt == nil || !node.IntelligenceCheckedAt.Equal(checkedAt) {
+		node.IntelligenceCheckedAt = &checkedAt
+		changed = true
+	}
+	return changed
 }
 
 func applyNodeExitIPProbeResult(node *NodeRecord, result nodeExitIPProbeResult) bool {
@@ -1464,6 +1613,7 @@ func applyNodeExitIPProbeResult(node *NodeRecord, result nodeExitIPProbeResult) 
 	}
 
 	changed := false
+	exitIPChanged := result.IP != "" && node.ExitIP != result.IP
 	checkedAt := result.CheckedAt
 	if checkedAt.IsZero() {
 		checkedAt = time.Now().UTC()
@@ -1473,7 +1623,7 @@ func applyNodeExitIPProbeResult(node *NodeRecord, result nodeExitIPProbeResult) 
 		changed = true
 	}
 
-	if result.IP != "" && node.ExitIP != result.IP {
+	if exitIPChanged {
 		node.ExitIP = result.IP
 		changed = true
 	}
@@ -1491,6 +1641,9 @@ func applyNodeExitIPProbeResult(node *NodeRecord, result nodeExitIPProbeResult) 
 			node.ExitIPError = ""
 			changed = true
 		}
+		if exitIPChanged {
+			changed = resetNodeIntelligenceVerdicts(node) || changed
+		}
 		return changed
 	}
 
@@ -1500,6 +1653,59 @@ func applyNodeExitIPProbeResult(node *NodeRecord, result nodeExitIPProbeResult) 
 	}
 	if node.ExitIPError != result.Error {
 		node.ExitIPError = result.Error
+		changed = true
+	}
+	return changed
+}
+
+func resetNodeIntelligenceVerdicts(node *NodeRecord) bool {
+	if node == nil {
+		return false
+	}
+
+	changed := false
+	if node.Cleanliness != CleanlinessUnknown {
+		node.Cleanliness = CleanlinessUnknown
+		changed = true
+	}
+	if node.CleanlinessReason != "" {
+		node.CleanlinessReason = ""
+		changed = true
+	}
+	if node.CleanlinessDetail != "" {
+		node.CleanlinessDetail = ""
+		changed = true
+	}
+	if node.CleanlinessConfidence != NodeIntelligenceConfidenceUnknown {
+		node.CleanlinessConfidence = NodeIntelligenceConfidenceUnknown
+		changed = true
+	}
+	if node.NetworkType != NodeNetworkTypeUnknown {
+		node.NetworkType = NodeNetworkTypeUnknown
+		changed = true
+	}
+	if node.NetworkTypeReason != "" {
+		node.NetworkTypeReason = ""
+		changed = true
+	}
+	if node.NetworkTypeDetail != "" {
+		node.NetworkTypeDetail = ""
+		changed = true
+	}
+	if node.NetworkTypeConfidence != NodeIntelligenceConfidenceUnknown {
+		node.NetworkTypeConfidence = NodeIntelligenceConfidenceUnknown
+		changed = true
+	}
+	if node.IntelligenceExitIP != "" {
+		node.IntelligenceExitIP = ""
+		changed = true
+	}
+	if node.IntelligenceCheckedAt != nil {
+		node.IntelligenceCheckedAt = nil
+		changed = true
+	}
+	if node.IntelligenceError != "" {
+		node.IntelligenceError = ""
 		changed = true
 	}
 	return changed
@@ -1986,12 +2192,24 @@ func normalizeNodeRecord(node *NodeRecord, now time.Time) bool {
 		node.Cleanliness = CleanlinessUnknown
 		changed = true
 	}
+	if node.CleanlinessConfidence == "" {
+		node.CleanlinessConfidence = NodeIntelligenceConfidenceUnknown
+		changed = true
+	}
 	if node.ExitIPStatus == "" {
 		node.ExitIPStatus = NodeExitIPStatusUnknown
 		changed = true
 	}
 	if node.BandwidthTier == "" {
 		node.BandwidthTier = BandwidthTierUnknown
+		changed = true
+	}
+	if node.NetworkType == "" {
+		node.NetworkType = NodeNetworkTypeUnknown
+		changed = true
+	}
+	if node.NetworkTypeConfidence == "" {
+		node.NetworkTypeConfidence = NodeIntelligenceConfidenceUnknown
 		changed = true
 	}
 	if isProbeableStatus(node.Status) {
