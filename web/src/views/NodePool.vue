@@ -134,8 +134,36 @@
         <div class="summary-value">{{ summary.quarantineCount }}</div>
       </div>
       <div class="summary-item">
+        <div class="summary-label">{{ t('nodePool.status.candidate') }}</div>
+        <div class="summary-value">{{ summary.candidateCount }}</div>
+      </div>
+    </div>
+
+    <div class="node-pool-meta">{{ t('nodePool.intelligenceSummaryTitle') }}</div>
+    <div class="summary-strip">
+      <div class="summary-item">
+        <div class="summary-label">{{ t('nodePool.cleanliness.trusted') }}</div>
+        <div class="summary-value">{{ intelligenceSummary.trustedCount }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">{{ t('nodePool.cleanliness.suspicious') }}</div>
+        <div class="summary-value">{{ intelligenceSummary.suspiciousCount }}</div>
+      </div>
+      <div class="summary-item">
         <div class="summary-label">{{ t('nodePool.cleanliness.unknown') }}</div>
-        <div class="summary-value">{{ summary.unknownCleanCount }}</div>
+        <div class="summary-value">{{ intelligenceSummary.unknownCleanCount }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">{{ t('nodePool.networkType.residential_likely') }}</div>
+        <div class="summary-value">{{ intelligenceSummary.residentialCount }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">{{ t('nodePool.networkType.datacenter_likely') }}</div>
+        <div class="summary-value">{{ intelligenceSummary.datacenterCount }}</div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">{{ t('nodePool.networkType.unknown') }}</div>
+        <div class="summary-value">{{ intelligenceSummary.unknownNetworkCount }}</div>
       </div>
     </div>
 
@@ -220,6 +248,7 @@
           :columns="activeColumns"
           :data="activeNodes"
           :loading="loading"
+          :scroll-x="1680"
           :pagination="{ pageSize: 10 }"
         />
         <div v-else class="node-card-list">
@@ -232,12 +261,31 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
+            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
+              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
+              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
+            </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
               <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
                 {{ cleanlinessLabel(node.cleanliness) }}
+              </n-tag>
+              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                {{ networkTypeLabel(node.networkType) }}
+              </n-tag>
+              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                {{ exitIpStatusLabel(node.exitIpStatus) }}
               </n-tag>
               <n-tag size="small">{{ delayLabel(node) }}</n-tag>
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
@@ -290,6 +338,7 @@
           :row-key="rowKey"
           :checked-row-keys="selectedStagingIds"
           :loading="loading"
+          :scroll-x="1680"
           :pagination="{ pageSize: 10 }"
           @update:checked-row-keys="(keys) => handleCheckedRowKeysUpdate('staging', keys)"
         />
@@ -308,12 +357,31 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
+            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
+              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
+              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
+            </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
               <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
                 {{ cleanlinessLabel(node.cleanliness) }}
+              </n-tag>
+              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                {{ networkTypeLabel(node.networkType) }}
+              </n-tag>
+              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                {{ exitIpStatusLabel(node.exitIpStatus) }}
               </n-tag>
               <n-tag size="small">{{ delayLabel(node) }}</n-tag>
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
@@ -372,6 +440,7 @@
           :row-key="rowKey"
           :checked-row-keys="selectedQuarantineIds"
           :loading="loading"
+          :scroll-x="1680"
           :pagination="{ pageSize: 10 }"
           @update:checked-row-keys="(keys) => handleCheckedRowKeysUpdate('quarantine', keys)"
         />
@@ -390,12 +459,31 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
+            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
+              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
+              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
+            </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
               <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
                 {{ cleanlinessLabel(node.cleanliness) }}
+              </n-tag>
+              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                {{ networkTypeLabel(node.networkType) }}
+              </n-tag>
+              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                {{ exitIpStatusLabel(node.exitIpStatus) }}
               </n-tag>
               <n-tag size="small">{{ delayLabel(node) }}</n-tag>
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
@@ -454,6 +542,7 @@
           :row-key="rowKey"
           :checked-row-keys="selectedCandidateIds"
           :loading="loading"
+          :scroll-x="1680"
           :pagination="{ pageSize: 10 }"
           @update:checked-row-keys="(keys) => handleCheckedRowKeysUpdate('candidate', keys)"
         />
@@ -472,12 +561,31 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
+            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
+              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
+              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
+            </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
               <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
                 {{ cleanlinessLabel(node.cleanliness) }}
+              </n-tag>
+              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                {{ networkTypeLabel(node.networkType) }}
+              </n-tag>
+              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                {{ exitIpStatusLabel(node.exitIpStatus) }}
               </n-tag>
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
             </n-space>
@@ -546,6 +654,7 @@
           :row-key="rowKey"
           :checked-row-keys="selectedRemovedIds"
           :loading="loading"
+          :scroll-x="1680"
           :pagination="{ pageSize: 10 }"
           @update:checked-row-keys="(keys) => handleCheckedRowKeysUpdate('removed', keys)"
         />
@@ -564,10 +673,32 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
+            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
+              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
+            </div>
+            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
+              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
+            </div>
             <div class="node-card-meta">{{ t('nodePool.removedAt') }}: {{ formatDateTime(node.statusUpdatedAt || node.lastEventAt || node.addedAt) || '-' }}</div>
-            <n-space v-if="showSubscriptionMissingTag(node)" :size="8" wrap>
-              <n-tag size="small" type="warning">
+            <n-space :size="8" wrap>
+              <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
+              </n-tag>
+              <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
+                {{ cleanlinessLabel(node.cleanliness) }}
+              </n-tag>
+              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                {{ networkTypeLabel(node.networkType) }}
+              </n-tag>
+              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                {{ exitIpStatusLabel(node.exitIpStatus) }}
               </n-tag>
             </n-space>
             <n-space :size="8" class="node-card-actions">
@@ -677,8 +808,11 @@ import type {
   MachineState,
   MachineStateReason,
   NodeEvent,
+  NodeExitIPStatus,
+  NodeIntelligenceConfidence,
   NodePoolDashboardResponse,
   NodePoolSummary,
+  NodeNetworkType,
   NodeRecord,
   NodeStatus,
   TunEditableSettings,
@@ -689,9 +823,11 @@ import type {
   ValidationConfig
 } from '@/api/types'
 import {
+  firstNodeIntelligenceDetail,
   normalizeListInput,
   sortPoolNodes,
   sortRemovedNodes,
+  summarizeNodeIntelligence,
   type PoolSortMode,
   type RemovedSortMode
 } from '@/utils/nodePool'
@@ -793,6 +929,7 @@ const tunSettingsForm = ref<TunEditableSettings>({
 const nodes = computed(() => dashboard.value.nodes || [])
 const summary = computed<NodePoolSummary>(() => dashboard.value.summary)
 const recentEvents = computed<NodeEvent[]>(() => dashboard.value.recentEvents || [])
+const intelligenceSummary = computed(() => summarizeNodeIntelligence(nodes.value))
 const activeNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'active'), activeSortMode.value))
 const stagingNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'staging'), stagingSortMode.value))
 const quarantineNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'quarantine'), quarantineSortMode.value))
@@ -983,6 +1120,22 @@ function cleanlinessLabel(cleanliness: CleanlinessStatus) {
   return translateCode('nodePool.cleanliness', cleanliness)
 }
 
+function networkTypeLabel(networkType: NodeNetworkType) {
+  return translateCode('nodePool.networkType', networkType)
+}
+
+function confidenceLabel(confidence: NodeIntelligenceConfidence) {
+  return translateCode('nodePool.confidence', confidence)
+}
+
+function exitIpStatusLabel(status: NodeExitIPStatus) {
+  return translateCode('nodePool.exitIpStatus', status)
+}
+
+function intelligenceReasonLabel(reason?: string) {
+  return translateCode('nodePool.intelligenceReason', reason || 'insufficient_signal')
+}
+
 function statusTagType(status: NodeStatus) {
   switch (status) {
     case 'active':
@@ -1009,6 +1162,28 @@ function cleanlinessTagType(cleanliness: CleanlinessStatus) {
   }
 }
 
+function networkTypeTagType(networkType: NodeNetworkType) {
+  switch (networkType) {
+    case 'residential_likely':
+      return 'success'
+    case 'datacenter_likely':
+      return 'warning'
+    default:
+      return 'default'
+  }
+}
+
+function exitIpStatusTagType(status: NodeExitIPStatus) {
+  switch (status) {
+    case 'error':
+      return 'error'
+    case 'unknown':
+      return 'warning'
+    default:
+      return 'info'
+  }
+}
+
 function failRateLabel(node: NodeRecord) {
   if (!node.totalPings) return t('nodePool.failRateUnknown')
   return `${((node.failedPings / node.totalPings) * 100).toFixed(1)}%`
@@ -1016,6 +1191,67 @@ function failRateLabel(node: NodeRecord) {
 
 function delayLabel(node: NodeRecord) {
   return node.avgDelayMs > 0 ? `${node.avgDelayMs}ms` : t('nodePool.delayUnknown')
+}
+
+function nodeExitIpHeadline(node: NodeRecord) {
+  if (node.exitIpStatus === 'available' && node.exitIp) {
+    return `${t('nodePool.exitIpLabel')}: ${node.exitIp}`
+  }
+  return `${t('nodePool.exitIpLabel')}: ${exitIpStatusLabel(node.exitIpStatus || 'unknown')}`
+}
+
+function nodeExitIpMeta(node: NodeRecord) {
+  if (node.exitIpStatus === 'available') {
+    const parts = [node.exitIpSource, formatDateTime(node.exitIpCheckedAt)].filter(Boolean)
+    return parts.join(' · ')
+  }
+  return node.exitIpError || ''
+}
+
+function nodeIntelligenceDetail(node: NodeRecord) {
+  return firstNodeIntelligenceDetail(node)
+}
+
+function nodeIntelligenceDetailLine(node: NodeRecord) {
+  const detail = nodeIntelligenceDetail(node)
+  return detail ? `${t('nodePool.intelligenceDetailLabel')}: ${detail}` : ''
+}
+
+type VerdictKind = 'cleanliness' | 'network'
+
+function nodeVerdictLine(kind: VerdictKind, reason: string | undefined, confidence: NodeIntelligenceConfidence) {
+  const labelKey = kind === 'cleanliness' ? 'cleanlinessReasonLabel' : 'networkReasonLabel'
+  return `${t(`nodePool.${labelKey}`)}: ${intelligenceReasonLabel(reason)} (${confidenceLabel(confidence || 'unknown')})`
+}
+
+function nodeVerdictTitle(kind: VerdictKind, node: NodeRecord) {
+  const detail = kind === 'cleanliness' ? node.cleanlinessDetail : node.networkTypeDetail
+  const extra = kind === 'cleanliness' ? node.intelligenceError : ''
+  return [detail, extra].filter(Boolean).join('\n')
+}
+
+function renderNodeIntelligence(row: NodeRecord) {
+  const exitMeta = nodeExitIpMeta(row)
+  const detailLine = nodeIntelligenceDetailLine(row)
+  const cleanlinessTitle = nodeVerdictTitle('cleanliness', row) || undefined
+  const networkTitle = nodeVerdictTitle('network', row) || undefined
+
+  return h('div', { class: 'node-intelligence-cell' }, [
+    h(NSpace, { size: 6, wrap: true }, {
+      default: () => [
+        h(NTag, { size: 'small', type: cleanlinessTagType(row.cleanliness) }, { default: () => cleanlinessLabel(row.cleanliness) }),
+        h(NTag, { size: 'small', type: networkTypeTagType(row.networkType) }, { default: () => networkTypeLabel(row.networkType) }),
+        row.exitIpStatus !== 'available'
+          ? h(NTag, { size: 'small', type: exitIpStatusTagType(row.exitIpStatus) }, { default: () => exitIpStatusLabel(row.exitIpStatus) })
+          : null
+      ]
+    }),
+    h('div', { class: 'node-pool-meta' }, nodeExitIpHeadline(row)),
+    exitMeta ? h('div', { class: 'node-pool-meta node-intelligence-secondary', title: exitMeta }, exitMeta) : null,
+    h('div', { class: 'node-pool-meta node-intelligence-secondary', title: cleanlinessTitle }, nodeVerdictLine('cleanliness', row.cleanlinessReason, row.cleanlinessConfidence)),
+    h('div', { class: 'node-pool-meta node-intelligence-secondary', title: networkTitle }, nodeVerdictLine('network', row.networkTypeReason, row.networkTypeConfidence)),
+    detailLine ? h('div', { class: 'node-pool-meta node-intelligence-secondary', title: detailLine }, detailLine) : null
+  ])
 }
 
 function formatDateTime(value?: string) {
@@ -1142,10 +1378,10 @@ function createColumns(group: 'candidate' | 'staging' | 'active' | 'quarantine' 
       render: (row) => h(NTag, { size: 'small', type: statusTagType(row.status) }, { default: () => statusLabel(row.status) })
     },
     {
-      title: () => t('nodePool.cleanlinessLabel'),
-      key: 'cleanliness',
-      width: 120,
-      render: (row) => h(NTag, { size: 'small', type: cleanlinessTagType(row.cleanliness) }, { default: () => cleanlinessLabel(row.cleanliness) })
+      title: () => t('nodePool.intelligenceLabel'),
+      key: 'intelligence',
+      width: 340,
+      render: (row) => renderNodeIntelligence(row)
     },
     {
       title: () => t('nodePool.address'),
@@ -1777,6 +2013,17 @@ onBeforeUnmount(() => {
   margin-top: 6px;
   font-size: 24px;
   font-weight: 600;
+}
+
+.node-intelligence-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.node-intelligence-secondary,
+.node-card-meta-detail {
+  line-height: 1.5;
 }
 
 .section-block {

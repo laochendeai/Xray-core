@@ -443,6 +443,7 @@
     "bulkPurgeRemovedFullFailuresConfirm": "Permanently delete these {count} removed nodes with a 100% failure rate? This cannot be undone.",
     "lastEvaluatedAt": "Last Evaluated",
     "activePoolCount": "Active nodes {active} / minimum {minimum}",
+    "intelligenceSummaryTitle": "Node Intelligence Overview",
     "emptyEvents": "No trust events yet. Import nodes or wait for validation to begin.",
     "emptyActive": "No active nodes are ready yet.",
     "emptyStaging": "No nodes are currently under validation.",
@@ -499,7 +500,13 @@
     "tunSettingsSavedRunning": "Transparent settings saved. Restore clean mode and enable transparent mode again for full effect on the running TUN runtime",
     "minActiveNodes": "Minimum active nodes required for transparent mode",
     "minBandwidthKbps": "Minimum bandwidth threshold (kbps, placeholder)",
+    "intelligenceLabel": "Node Intelligence",
     "cleanlinessLabel": "Cleanliness",
+    "exitIpLabel": "Exit IP",
+    "networkTypeLabel": "Network Type",
+    "cleanlinessReasonLabel": "Cleanliness Verdict",
+    "networkReasonLabel": "Network Verdict",
+    "intelligenceDetailLabel": "Technical Detail",
     "reasonLabel": "Reason",
     "lastCheckedAt": "Last Updated",
     "removedAt": "Removed At",
@@ -541,6 +548,32 @@
       "unknown": "Unknown",
       "trusted": "Clean",
       "suspicious": "Suspicious"
+    },
+    "networkType": {
+      "unknown": "Network Unknown",
+      "residential_likely": "Residential Likely",
+      "datacenter_likely": "Datacenter Likely"
+    },
+    "confidence": {
+      "unknown": "Confidence Unknown",
+      "low": "Low Confidence",
+      "medium": "Medium Confidence",
+      "high": "High Confidence"
+    },
+    "exitIpStatus": {
+      "unknown": "Exit IP Unknown",
+      "available": "Exit IP Available",
+      "error": "Exit IP Probe Failed"
+    },
+    "intelligenceReason": {
+      "exit_ip_unavailable": "No usable exit IP is available",
+      "lookup_failed": "Exit-IP intelligence lookup failed",
+      "hosting_keyword_match": "Matched a hosting or cloud-provider signal",
+      "residential_keyword_match": "Matched an access-ISP or residential signal",
+      "probe_failure_rate_high": "Probe failure rate is too high",
+      "residential_stable_exit": "Residential-like exit with stable probe history",
+      "datacenter_exit_network": "Exit looks more like a datacenter network",
+      "insufficient_signal": "Signal is still too weak for a verdict"
     },
     "machineStateLabel": {
       "clean": "Clean",

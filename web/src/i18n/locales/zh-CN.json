@@ -443,6 +443,7 @@
     "bulkPurgeRemovedFullFailuresConfirm": "确定要从已移除池彻底删除这 {count} 个 100% 失败节点吗？删除后不可恢复。",
     "lastEvaluatedAt": "最近评估",
     "activePoolCount": "活跃节点 {active} / 最低要求 {minimum}",
+    "intelligenceSummaryTitle": "节点情报概览",
     "emptyEvents": "还没有可信度事件。导入节点或等待验证开始。",
     "emptyActive": "还没有可用的活跃节点。",
     "emptyStaging": "当前没有正在验证的节点。",
@@ -499,7 +500,13 @@
     "tunSettingsSavedRunning": "透明模式配置已保存；当前运行态建议先恢复干净环境再重新启用以完整生效",
     "minActiveNodes": "启用透明模式的最少活跃节点数",
     "minBandwidthKbps": "最低带宽阈值(kbps，占位)",
+    "intelligenceLabel": "节点情报",
     "cleanlinessLabel": "干净度",
+    "exitIpLabel": "出口 IP",
+    "networkTypeLabel": "网络类型",
+    "cleanlinessReasonLabel": "干净度判断",
+    "networkReasonLabel": "网络类型判断",
+    "intelligenceDetailLabel": "技术细节",
     "reasonLabel": "原因",
     "lastCheckedAt": "最近更新",
     "removedAt": "移除时间",
@@ -541,6 +548,32 @@
       "unknown": "未知",
       "trusted": "干净",
       "suspicious": "可疑"
+    },
+    "networkType": {
+      "unknown": "网络未知",
+      "residential_likely": "家宽倾向",
+      "datacenter_likely": "机房倾向"
+    },
+    "confidence": {
+      "unknown": "置信度未知",
+      "low": "低置信度",
+      "medium": "中置信度",
+      "high": "高置信度"
+    },
+    "exitIpStatus": {
+      "unknown": "出口 IP 未知",
+      "available": "出口 IP 已获取",
+      "error": "出口 IP 探测失败"
+    },
+    "intelligenceReason": {
+      "exit_ip_unavailable": "没有可用的出口 IP",
+      "lookup_failed": "出口 IP 情报查询失败",
+      "hosting_keyword_match": "命中机房/云厂商特征",
+      "residential_keyword_match": "命中家宽/接入运营商特征",
+      "probe_failure_rate_high": "失败率过高",
+      "residential_stable_exit": "家宽出口且探测稳定",
+      "datacenter_exit_network": "出口更像机房网络",
+      "insufficient_signal": "信号不足，暂不下结论"
     },
     "machineStateLabel": {
       "clean": "干净",
