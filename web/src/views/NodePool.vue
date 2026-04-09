@@ -262,11 +262,17 @@
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
               {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
             </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
               {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
             </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
@@ -352,11 +358,17 @@
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
               {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
             </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
               {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
             </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
@@ -448,11 +460,17 @@
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
               {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
             </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
               {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
             </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
@@ -544,11 +562,17 @@
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
               {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
             </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
               {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
             </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
@@ -650,11 +674,17 @@
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
             <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
+            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
+              {{ nodeExitIpMeta(node) }}
+            </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
               {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
             </div>
             <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
               {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
+            </div>
+            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
+              {{ nodeIntelligenceDetailLine(node) }}
             </div>
             <div class="node-card-meta">{{ t('nodePool.removedAt') }}: {{ formatDateTime(node.statusUpdatedAt || node.lastEventAt || node.addedAt) || '-' }}</div>
             <n-space :size="8" wrap>
@@ -793,6 +823,7 @@ import type {
   ValidationConfig
 } from '@/api/types'
 import {
+  firstNodeIntelligenceDetail,
   normalizeListInput,
   sortPoolNodes,
   sortRemovedNodes,
@@ -1177,6 +1208,15 @@ function nodeExitIpMeta(node: NodeRecord) {
   return node.exitIpError || ''
 }
 
+function nodeIntelligenceDetail(node: NodeRecord) {
+  return firstNodeIntelligenceDetail(node)
+}
+
+function nodeIntelligenceDetailLine(node: NodeRecord) {
+  const detail = nodeIntelligenceDetail(node)
+  return detail ? `${t('nodePool.intelligenceDetailLabel')}: ${detail}` : ''
+}
+
 type VerdictKind = 'cleanliness' | 'network'
 
 function nodeVerdictLine(kind: VerdictKind, reason: string | undefined, confidence: NodeIntelligenceConfidence) {
@@ -1192,6 +1232,7 @@ function nodeVerdictTitle(kind: VerdictKind, node: NodeRecord) {
 
 function renderNodeIntelligence(row: NodeRecord) {
   const exitMeta = nodeExitIpMeta(row)
+  const detailLine = nodeIntelligenceDetailLine(row)
   const cleanlinessTitle = nodeVerdictTitle('cleanliness', row) || undefined
   const networkTitle = nodeVerdictTitle('network', row) || undefined
 
@@ -1208,7 +1249,8 @@ function renderNodeIntelligence(row: NodeRecord) {
     h('div', { class: 'node-pool-meta' }, nodeExitIpHeadline(row)),
     exitMeta ? h('div', { class: 'node-pool-meta node-intelligence-secondary', title: exitMeta }, exitMeta) : null,
     h('div', { class: 'node-pool-meta node-intelligence-secondary', title: cleanlinessTitle }, nodeVerdictLine('cleanliness', row.cleanlinessReason, row.cleanlinessConfidence)),
-    h('div', { class: 'node-pool-meta node-intelligence-secondary', title: networkTitle }, nodeVerdictLine('network', row.networkTypeReason, row.networkTypeConfidence))
+    h('div', { class: 'node-pool-meta node-intelligence-secondary', title: networkTitle }, nodeVerdictLine('network', row.networkTypeReason, row.networkTypeConfidence)),
+    detailLine ? h('div', { class: 'node-pool-meta node-intelligence-secondary', title: detailLine }, detailLine) : null
   ])
 }
 
