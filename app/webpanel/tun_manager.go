@@ -48,6 +48,7 @@ var (
 
 type TunSelectionPolicy string
 type TunRouteMode string
+type TunDestinationBindingPreset string
 
 const (
 	TunSelectionPolicyFastest        TunSelectionPolicy = "fastest"
@@ -58,6 +59,12 @@ const (
 const (
 	TunRouteModeStrictProxy TunRouteMode = "strict_proxy"
 	TunRouteModeAutoTested  TunRouteMode = "auto_tested"
+)
+
+const (
+	TunDestinationBindingPresetOpenAI  TunDestinationBindingPreset = "openai"
+	TunDestinationBindingPresetChatGPT TunDestinationBindingPreset = "chatgpt"
+	TunDestinationBindingPresetCustom  TunDestinationBindingPreset = "custom"
 )
 
 const (
@@ -73,6 +80,24 @@ const (
 	tunPublicEgressCacheFile    = "egress-probe-cache.json"
 )
 
+var tunDestinationBindingPresetDomains = map[TunDestinationBindingPreset][]string{
+	TunDestinationBindingPresetOpenAI: {
+		"domain:openai.com",
+		"domain:api.openai.com",
+		"domain:auth.openai.com",
+		"domain:chatgpt.com",
+		"domain:chat.openai.com",
+		"domain:oaistatic.com",
+		"domain:oaiusercontent.com",
+	},
+	TunDestinationBindingPresetChatGPT: {
+		"domain:chatgpt.com",
+		"domain:chat.openai.com",
+		"domain:oaistatic.com",
+		"domain:oaiusercontent.com",
+	},
+}
+
 type TunManager struct {
 	configPath         string
 	xrayBin            string
@@ -80,28 +105,36 @@ type TunManager struct {
 	directEgressProber func(*TunFeatureSettings) tunPublicEgressProbeResult
 }
 
+type TunDestinationBinding struct {
+	Preset  string   `json:"preset"`
+	Domains []string `json:"domains,omitempty"`
+	NodeID  string   `json:"nodeId"`
+}
+
 type TunFeatureSettings struct {
-	BinaryPath        string   `json:"binaryPath"`
-	HelperPath        string   `json:"helperPath"`
-	StateDir          string   `json:"stateDir"`
-	RuntimeConfigPath string   `json:"runtimeConfigPath"`
-	InterfaceName     string   `json:"interfaceName"`
-	MTU               uint32   `json:"mtu"`
-	RemoteDNS         []string `json:"remoteDns"`
-	UseSudo           *bool    `json:"useSudo"`
-	AllowRemote       bool     `json:"allowRemote"`
-	SelectionPolicy   string   `json:"selectionPolicy"`
-	RouteMode         string   `json:"routeMode"`
-	ProtectCIDRs      []string `json:"protectCidrs"`
-	ProtectDomains    []string `json:"protectDomains"`
+	BinaryPath          string                  `json:"binaryPath"`
+	HelperPath          string                  `json:"helperPath"`
+	StateDir            string                  `json:"stateDir"`
+	RuntimeConfigPath   string                  `json:"runtimeConfigPath"`
+	InterfaceName       string                  `json:"interfaceName"`
+	MTU                 uint32                  `json:"mtu"`
+	RemoteDNS           []string                `json:"remoteDns"`
+	UseSudo             *bool                   `json:"useSudo"`
+	AllowRemote         bool                    `json:"allowRemote"`
+	SelectionPolicy     string                  `json:"selectionPolicy"`
+	RouteMode           string                  `json:"routeMode"`
+	ProtectCIDRs        []string                `json:"protectCidrs"`
+	ProtectDomains      []string                `json:"protectDomains"`
+	DestinationBindings []TunDestinationBinding `json:"destinationBindings,omitempty"`
 }
 
 type TunEditableSettings struct {
-	SelectionPolicy string   `json:"selectionPolicy"`
-	RouteMode       string   `json:"routeMode"`
-	RemoteDNS       []string `json:"remoteDns"`
-	ProtectCIDRs    []string `json:"protectCidrs"`
-	ProtectDomains  []string `json:"protectDomains"`
+	SelectionPolicy     string                  `json:"selectionPolicy"`
+	RouteMode           string                  `json:"routeMode"`
+	RemoteDNS           []string                `json:"remoteDns"`
+	ProtectCIDRs        []string                `json:"protectCidrs"`
+	ProtectDomains      []string                `json:"protectDomains"`
+	DestinationBindings []TunDestinationBinding `json:"destinationBindings,omitempty"`
 }
 
 type TunRoutingDiagnostic struct {
@@ -647,6 +680,7 @@ func (m *TunManager) loadSettings() (*TunFeatureSettings, error) {
 
 	settings.ProtectCIDRs = uniqStrings(append(append([]string{}, defaultTunCIDRs...), settings.ProtectCIDRs...))
 	settings.ProtectDomains = normalizeTunDomainRules(append(append([]string{}, defaultTunDomains...), settings.ProtectDomains...))
+	settings.DestinationBindings = normalizeTunDestinationBindings(settings.DestinationBindings)
 
 	return settings, nil
 }
@@ -713,6 +747,13 @@ func (m *TunManager) UpdateEditableSettings(next TunEditableSettings) (*TunEdita
 		delete(tun, "protectCidrs")
 	}
 
+	destinationBindings := normalizeTunDestinationBindings(next.DestinationBindings)
+	if len(destinationBindings) > 0 {
+		tun["destinationBindings"] = destinationBindings
+	} else {
+		delete(tun, "destinationBindings")
+	}
+
 	webpanel["tun"] = tun
 	config["webpanel"] = webpanel
 
@@ -757,6 +798,7 @@ func (m *TunManager) loadEditableSettingsLocked() (*TunEditableSettings, error) 
 	}
 	settings.ProtectDomains = normalizeTunDomainRules(stringSliceFromAny(tun["protectDomains"]))
 	settings.ProtectCIDRs = uniqStrings(stringSliceFromAny(tun["protectCidrs"]))
+	settings.DestinationBindings = normalizeTunDestinationBindings(tunDestinationBindingsFromAny(tun["destinationBindings"]))
 
 	return settings, nil
 }
@@ -1296,8 +1338,10 @@ func buildTunRuntimeConfigWithDirectProbeResults(raw []byte, settings *TunFeatur
 		"inboundTag":  []string{"tun-in"},
 		"balancerTag": "node-pool-active",
 	}
+	bindingRules := buildTunDestinationBindingRules(settings, activeNodes)
 
 	rules := append(prependRules, priorityRules...)
+	rules = append(rules, bindingRules...)
 	rules = append(rules, tunDirectRules...)
 	rules = append(rules, tunCatchAllRule)
 	routing["rules"] = rules
@@ -1518,6 +1562,39 @@ func buildTunDNSConfig(settings *TunFeatureSettings) map[string]interface{} {
 	}
 }
 
+func buildTunDestinationBindingRules(settings *TunFeatureSettings, activeNodes []NodeRecord) []interface{} {
+	if settings == nil || len(settings.DestinationBindings) == 0 || len(activeNodes) == 0 {
+		return nil
+	}
+
+	activeNodeIDs := make(map[string]struct{}, len(activeNodes))
+	for _, node := range activeNodes {
+		if strings.TrimSpace(node.ID) == "" {
+			continue
+		}
+		activeNodeIDs[node.ID] = struct{}{}
+	}
+
+	rules := make([]interface{}, 0, len(settings.DestinationBindings))
+	for _, binding := range normalizeTunDestinationBindings(settings.DestinationBindings) {
+		if _, ok := activeNodeIDs[binding.NodeID]; !ok {
+			continue
+		}
+
+		domains := tunDestinationBindingDomains(binding)
+		if len(domains) == 0 {
+			continue
+		}
+
+		rules = append(rules, map[string]interface{}{
+			"type":        "field",
+			"domain":      domains,
+			"outboundTag": buildTunOutboundTag(binding.NodeID),
+		})
+	}
+	return rules
+}
+
 func normalizeTunSelectionPolicy(value string) TunSelectionPolicy {
 	switch TunSelectionPolicy(strings.ToLower(strings.TrimSpace(value))) {
 	case TunSelectionPolicyLowestLatency:
@@ -1535,6 +1612,89 @@ func normalizeTunRouteMode(value string) TunRouteMode {
 		return TunRouteModeAutoTested
 	default:
 		return TunRouteModeStrictProxy
+	}
+}
+
+func normalizeTunDestinationBindingPreset(value string) TunDestinationBindingPreset {
+	switch TunDestinationBindingPreset(strings.ToLower(strings.TrimSpace(value))) {
+	case TunDestinationBindingPresetOpenAI:
+		return TunDestinationBindingPresetOpenAI
+	case TunDestinationBindingPresetChatGPT:
+		return TunDestinationBindingPresetChatGPT
+	default:
+		return TunDestinationBindingPresetCustom
+	}
+}
+
+func normalizeTunDestinationBindings(bindings []TunDestinationBinding) []TunDestinationBinding {
+	result := make([]TunDestinationBinding, 0, len(bindings))
+	seen := make(map[string]struct{}, len(bindings))
+	for _, binding := range bindings {
+		next, ok := normalizeTunDestinationBinding(binding)
+		if !ok {
+			continue
+		}
+		key := next.Preset + "|" + next.NodeID + "|" + strings.Join(next.Domains, ",")
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, next)
+	}
+	return result
+}
+
+func normalizeTunDestinationBinding(binding TunDestinationBinding) (TunDestinationBinding, bool) {
+	nodeID := strings.TrimSpace(binding.NodeID)
+	if nodeID == "" {
+		return TunDestinationBinding{}, false
+	}
+
+	preset := normalizeTunDestinationBindingPreset(binding.Preset)
+	normalized := TunDestinationBinding{
+		Preset: string(preset),
+		NodeID: nodeID,
+	}
+	if preset == TunDestinationBindingPresetCustom {
+		normalized.Domains = normalizeTunDomainRules(binding.Domains)
+		if len(normalized.Domains) == 0 {
+			return TunDestinationBinding{}, false
+		}
+	}
+
+	return normalized, true
+}
+
+func tunDestinationBindingDomains(binding TunDestinationBinding) []string {
+	preset := normalizeTunDestinationBindingPreset(binding.Preset)
+	if preset == TunDestinationBindingPresetCustom {
+		return normalizeTunDomainRules(binding.Domains)
+	}
+	return append([]string{}, tunDestinationBindingPresetDomains[preset]...)
+}
+
+func tunDestinationBindingsFromAny(raw interface{}) []TunDestinationBinding {
+	switch typed := raw.(type) {
+	case []TunDestinationBinding:
+		return append([]TunDestinationBinding{}, typed...)
+	case []interface{}:
+		result := make([]TunDestinationBinding, 0, len(typed))
+		for _, item := range typed {
+			entry, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			preset, _ := entry["preset"].(string)
+			nodeID, _ := entry["nodeId"].(string)
+			result = append(result, TunDestinationBinding{
+				Preset:  strings.TrimSpace(preset),
+				Domains: stringSliceFromAny(entry["domains"]),
+				NodeID:  strings.TrimSpace(nodeID),
+			})
+		}
+		return result
+	default:
+		return nil
 	}
 }
 

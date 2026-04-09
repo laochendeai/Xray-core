@@ -323,6 +323,13 @@ export interface TunStatusResponse {
 
 export type TunSelectionPolicy = 'fastest' | 'lowest_latency' | 'lowest_fail_rate'
 export type TunRouteMode = 'strict_proxy' | 'auto_tested'
+export type TunDestinationBindingPreset = 'openai' | 'chatgpt' | 'custom'
+
+export interface TunDestinationBinding {
+  preset: TunDestinationBindingPreset
+  domains: string[]
+  nodeId: string
+}
 
 export interface TunEditableSettings {
   selectionPolicy: TunSelectionPolicy
@@ -330,4 +337,5 @@ export interface TunEditableSettings {
   remoteDns: string[]
   protectDomains: string[]
   protectCidrs: string[]
+  destinationBindings: TunDestinationBinding[]
 }

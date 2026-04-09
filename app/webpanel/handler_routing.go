@@ -2,14 +2,29 @@ package webpanel
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	routerservice "github.com/xtls/xray-core/app/router/command"
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/serial"
 )
+
+type routingTestRequest struct {
+	Scope      string `json:"scope"`
+	Domain     string `json:"domain"`
+	IP         string `json:"ip"`
+	Port       int32  `json:"port"`
+	Network    string `json:"network"`
+	SourceIP   string `json:"sourceIP"`
+	SourcePort int32  `json:"sourcePort"`
+	Protocol   string `json:"protocol"`
+	User       string `json:"user"`
+	InboundTag string `json:"inboundTag"`
+}
 
 // handleRoutingRules handles GET /api/v1/routing/rules (list) and POST (add).
 func (wp *WebPanel) handleRoutingRules(w http.ResponseWriter, r *http.Request) {
@@ -117,19 +132,21 @@ func (wp *WebPanel) handleRoutingTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var testReq struct {
-		Domain     string `json:"domain"`
-		IP         string `json:"ip"`
-		Port       int32  `json:"port"`
-		Network    string `json:"network"`
-		SourceIP   string `json:"sourceIP"`
-		SourcePort int32  `json:"sourcePort"`
-		Protocol   string `json:"protocol"`
-		User       string `json:"user"`
-		InboundTag string `json:"inboundTag"`
-	}
+	var testReq routingTestRequest
 	if err := json.Unmarshal(body, &testReq); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	if strings.EqualFold(strings.TrimSpace(testReq.Scope), "tun") {
+		result, err := wp.previewTunRoute(testReq)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to preview TUN route: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"result": result,
+		})
 		return
 	}
 
@@ -191,6 +208,41 @@ func (wp *WebPanel) handleRoutingTest(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"result": result,
+	})
+}
+
+func (wp *WebPanel) previewTunRoute(testReq routingTestRequest) (tunRoutePreviewResult, error) {
+	if wp.tunManager == nil {
+		return tunRoutePreviewResult{}, fmt.Errorf("TUN manager is not configured")
+	}
+	if wp.subManager == nil {
+		return tunRoutePreviewResult{}, fmt.Errorf("subscription manager is not configured")
+	}
+
+	settings, err := wp.tunManager.SettingsSnapshot()
+	if err != nil {
+		return tunRoutePreviewResult{}, err
+	}
+	raw, err := os.ReadFile(wp.tunManager.configPath)
+	if err != nil {
+		return tunRoutePreviewResult{}, err
+	}
+	activeNodes := wp.subManager.ListNodesByStatuses(NodeStatusActive)
+	runtimeConfig, err := buildTunRuntimeConfig(raw, settings, activeNodes)
+	if err != nil {
+		return tunRoutePreviewResult{}, err
+	}
+
+	return previewTunRoute(runtimeConfig, tunRoutePreviewRequest{
+		Domain:     testReq.Domain,
+		IP:         testReq.IP,
+		Port:       testReq.Port,
+		Network:    testReq.Network,
+		SourceIP:   testReq.SourceIP,
+		SourcePort: testReq.SourcePort,
+		Protocol:   testReq.Protocol,
+		User:       testReq.User,
+		InboundTag: testReq.InboundTag,
 	})
 }
 

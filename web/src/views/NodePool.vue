@@ -87,6 +87,84 @@
           <n-form-item :label="t('nodePool.selectionPolicy')">
             <n-select v-model:value="tunSettingsForm.selectionPolicy" :options="selectionPolicyOptions" />
           </n-form-item>
+          <n-form-item :label="t('nodePool.destinationBindings')">
+            <div class="destination-binding-editor">
+              <n-alert type="info" :title="t('nodePool.destinationBindingsTitle')">
+                {{ t('nodePool.destinationBindingsDesc') }}
+              </n-alert>
+              <div v-if="!destinationBindingDrafts.length" class="node-pool-meta">
+                {{ t('nodePool.destinationBindingsEmpty') }}
+              </div>
+              <n-alert v-if="!activeNodes.length" type="warning">
+                {{ t('nodePool.destinationBindingsNoActiveNodes') }}
+              </n-alert>
+              <div v-if="destinationBindingDrafts.length" class="destination-binding-list">
+                <n-card
+                  v-for="binding in destinationBindingDrafts"
+                  :key="binding.key"
+                  size="small"
+                  class="destination-binding-card"
+                >
+                  <n-space vertical :size="12">
+                    <div class="destination-binding-row">
+                      <div class="destination-binding-field">
+                        <div class="destination-binding-label">{{ t('nodePool.destinationBindingPreset') }}</div>
+                        <n-select
+                          v-model:value="binding.preset"
+                          :options="destinationBindingPresetOptions"
+                        />
+                      </div>
+                      <div class="destination-binding-field">
+                        <div class="destination-binding-label">{{ t('nodePool.destinationBindingNode') }}</div>
+                        <n-select
+                          v-model:value="binding.nodeId"
+                          :options="bindingNodeOptions(binding)"
+                        />
+                      </div>
+                    </div>
+                    <div v-if="binding.preset === 'custom'" class="destination-binding-field">
+                      <div class="destination-binding-label">{{ t('nodePool.destinationBindingDomains') }}</div>
+                      <n-input
+                        v-model:value="binding.domainsText"
+                        type="textarea"
+                        :autosize="{ minRows: 3, maxRows: 8 }"
+                        :placeholder="t('nodePool.destinationBindingDomainsPlaceholder')"
+                      />
+                    </div>
+                    <div class="node-pool-meta">
+                      {{ t('nodePool.destinationBindingResolvedDomains', { domains: bindingResolvedDomains(binding).join(', ') || '-' }) }}
+                    </div>
+                    <div v-if="bindingTargetMissing(binding)" class="node-pool-meta destination-binding-warning">
+                      {{ t('nodePool.destinationBindingInactiveTarget', { nodeId: binding.nodeId }) }}
+                    </div>
+                    <n-space wrap>
+                      <n-button
+                        size="small"
+                        secondary
+                        :loading="testingDestinationBindingKey === binding.key"
+                        @click="handleTestDestinationBinding(binding)"
+                      >
+                        {{ t('nodePool.destinationBindingTest') }}
+                      </n-button>
+                      <n-button size="small" tertiary type="error" @click="removeDestinationBindingDraft(binding.key)">
+                        {{ t('common.delete') }}
+                      </n-button>
+                    </n-space>
+                    <n-alert
+                      v-if="destinationBindingTestResults[binding.key]"
+                      :type="bindingTestAlertType(binding.key)"
+                      class="destination-binding-test-alert"
+                    >
+                      {{ bindingTestSummary(binding.key) }}
+                    </n-alert>
+                  </n-space>
+                </n-card>
+              </div>
+              <n-button secondary @click="addDestinationBindingDraft">
+                {{ t('nodePool.destinationBindingAdd') }}
+              </n-button>
+            </div>
+          </n-form-item>
           <n-form-item :label="t('nodePool.remoteDns')">
             <n-input
               v-model:value="tunRemoteDnsText"
@@ -799,10 +877,11 @@ import {
   NTag,
   useMessage,
   type DataTableColumns,
-  type DataTableRowKey
+  type DataTableRowKey,
+  type SelectOption
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { nodePoolAPI, tunAPI } from '@/api/client'
+import { nodePoolAPI, routingAPI, tunAPI } from '@/api/client'
 import type {
   CleanlinessStatus,
   MachineState,
@@ -815,6 +894,8 @@ import type {
   NodeNetworkType,
   NodeRecord,
   NodeStatus,
+  TunDestinationBinding,
+  TunDestinationBindingPreset,
   TunEditableSettings,
   TunRouteMode,
   TunSelectionPolicy,
@@ -823,6 +904,8 @@ import type {
   ValidationConfig
 } from '@/api/types'
 import {
+  bindingPreviewDomains,
+  bindingPrimaryTestDomain,
   firstNodeIntelligenceDetail,
   normalizeListInput,
   sortPoolNodes,
@@ -834,6 +917,20 @@ import {
 
 const { t, te } = useI18n()
 const message = useMessage()
+
+interface DestinationBindingDraft {
+  key: string
+  preset: TunDestinationBindingPreset
+  domainsText: string
+  nodeId: string
+}
+
+interface DestinationBindingTestResult {
+  domain: string
+  expectedTarget: string
+  actualTarget: string
+  matched: boolean
+}
 
 const loading = ref(false)
 const tunUpdating = ref(false)
@@ -860,9 +957,13 @@ const selectedCandidateIds = ref<string[]>([])
 const selectedStagingIds = ref<string[]>([])
 const selectedQuarantineIds = ref<string[]>([])
 const selectedRemovedIds = ref<string[]>([])
+const destinationBindingDrafts = ref<DestinationBindingDraft[]>([])
+const destinationBindingTestResults = ref<Record<string, DestinationBindingTestResult>>({})
+const testingDestinationBindingKey = ref<string | null>(null)
 const tunRemoteDnsText = ref('')
 const tunProtectDomainsText = ref('')
 const tunProtectCidrsText = ref('')
+let destinationBindingDraftSeed = 0
 
 const dashboard = ref<NodePoolDashboardResponse>({
   nodes: [],
@@ -923,7 +1024,8 @@ const tunSettingsForm = ref<TunEditableSettings>({
   routeMode: 'strict_proxy',
   remoteDns: [],
   protectDomains: [],
-  protectCidrs: []
+  protectCidrs: [],
+  destinationBindings: []
 })
 
 const nodes = computed(() => dashboard.value.nodes || [])
@@ -1002,6 +1104,12 @@ const selectionPolicyOptions = computed(() => [
   { label: t('nodePool.selectionPolicyOptions.fastest'), value: 'fastest' as TunSelectionPolicy },
   { label: t('nodePool.selectionPolicyOptions.lowest_latency'), value: 'lowest_latency' as TunSelectionPolicy },
   { label: t('nodePool.selectionPolicyOptions.lowest_fail_rate'), value: 'lowest_fail_rate' as TunSelectionPolicy }
+])
+
+const destinationBindingPresetOptions = computed(() => [
+  { label: t('nodePool.destinationBindingPresetOptions.openai'), value: 'openai' as TunDestinationBindingPreset },
+  { label: t('nodePool.destinationBindingPresetOptions.chatgpt'), value: 'chatgpt' as TunDestinationBindingPreset },
+  { label: t('nodePool.destinationBindingPresetOptions.custom'), value: 'custom' as TunDestinationBindingPreset }
 ])
 
 const removedSortOptions = computed(() => [
@@ -1550,6 +1658,100 @@ function syncTunSettingsTextAreas() {
   tunProtectCidrsText.value = (tunSettingsForm.value.protectCidrs || []).join('\n')
 }
 
+function nextDestinationBindingDraftKey() {
+  destinationBindingDraftSeed += 1
+  return `binding-${destinationBindingDraftSeed}`
+}
+
+function bindingToDraft(binding: TunDestinationBinding): DestinationBindingDraft {
+  return {
+    key: nextDestinationBindingDraftKey(),
+    preset: binding.preset || 'openai',
+    domainsText: Array.isArray(binding.domains) ? binding.domains.join('\n') : '',
+    nodeId: binding.nodeId || ''
+  }
+}
+
+function draftToBinding(binding: DestinationBindingDraft): TunDestinationBinding {
+  return {
+    preset: binding.preset,
+    domains: binding.preset === 'custom' ? normalizeListInput(binding.domainsText) : [],
+    nodeId: binding.nodeId
+  }
+}
+
+function syncDestinationBindingDrafts(bindings: TunDestinationBinding[]) {
+  destinationBindingDrafts.value = Array.isArray(bindings) ? bindings.map(bindingToDraft) : []
+  destinationBindingTestResults.value = {}
+}
+
+function addDestinationBindingDraft() {
+  destinationBindingDrafts.value.push({
+    key: nextDestinationBindingDraftKey(),
+    preset: 'openai',
+    domainsText: '',
+    nodeId: activeNodes.value[0]?.id || ''
+  })
+}
+
+function removeDestinationBindingDraft(key: string) {
+  destinationBindingDrafts.value = destinationBindingDrafts.value.filter((binding) => binding.key !== key)
+  const nextResults = { ...destinationBindingTestResults.value }
+  delete nextResults[key]
+  destinationBindingTestResults.value = nextResults
+}
+
+function bindingResolvedDomains(binding: DestinationBindingDraft) {
+  return bindingPreviewDomains(draftToBinding(binding))
+}
+
+function bindingNodeOptionLabel(node: NodeRecord) {
+  const title = node.remark || `${node.address}:${node.port}`
+  const exitIp = node.exitIpStatus === 'available' && node.exitIp ? node.exitIp : exitIpStatusLabel(node.exitIpStatus || 'unknown')
+  return [title, exitIp, cleanlinessLabel(node.cleanliness), networkTypeLabel(node.networkType)].filter(Boolean).join(' · ')
+}
+
+function bindingNodeOptions(binding: DestinationBindingDraft) {
+  const options: SelectOption[] = activeNodes.value.map((node) => ({
+    label: bindingNodeOptionLabel(node),
+    value: node.id
+  }))
+  if (binding.nodeId && !activeNodes.value.some((node) => node.id === binding.nodeId)) {
+    options.unshift({
+      label: t('nodePool.destinationBindingInactiveTarget', { nodeId: binding.nodeId }),
+      value: binding.nodeId,
+      disabled: true
+    })
+  }
+  return options
+}
+
+function bindingTargetMissing(binding: DestinationBindingDraft) {
+  return !!binding.nodeId && !activeNodes.value.some((node) => node.id === binding.nodeId)
+}
+
+function bindingTestAlertType(key: string) {
+  const result = destinationBindingTestResults.value[key]
+  if (!result) return 'info'
+  return result.matched ? 'success' : 'warning'
+}
+
+function bindingTestSummary(key: string) {
+  const result = destinationBindingTestResults.value[key]
+  if (!result) return ''
+  if (result.matched) {
+    return t('nodePool.destinationBindingTestMatched', {
+      domain: result.domain,
+      target: result.actualTarget
+    })
+  }
+  return t('nodePool.destinationBindingTestMismatch', {
+    domain: result.domain,
+    expected: result.expectedTarget,
+    actual: result.actualTarget || '-'
+  })
+}
+
 async function fetchTunSettings() {
   const data = await tunAPI.getSettings()
   tunSettingsForm.value = {
@@ -1557,9 +1759,11 @@ async function fetchTunSettings() {
     routeMode: data.routeMode || 'strict_proxy',
     remoteDns: Array.isArray(data.remoteDns) ? data.remoteDns : [],
     protectDomains: Array.isArray(data.protectDomains) ? data.protectDomains : [],
-    protectCidrs: Array.isArray(data.protectCidrs) ? data.protectCidrs : []
+    protectCidrs: Array.isArray(data.protectCidrs) ? data.protectCidrs : [],
+    destinationBindings: Array.isArray(data.destinationBindings) ? data.destinationBindings : []
   }
   syncTunSettingsTextAreas()
+  syncDestinationBindingDrafts(tunSettingsForm.value.destinationBindings)
 }
 
 async function fetchTunStatus() {
@@ -1843,6 +2047,57 @@ async function handleSaveConfig() {
   }
 }
 
+async function handleTestDestinationBinding(binding: DestinationBindingDraft) {
+  const payload = draftToBinding(binding)
+  const domain = bindingPrimaryTestDomain(payload)
+  if (!payload.nodeId) {
+    message.error(t('nodePool.destinationBindingNodeRequired'))
+    return
+  }
+  if (!domain) {
+    message.error(t('nodePool.destinationBindingDomainRequired'))
+    return
+  }
+
+  testingDestinationBindingKey.value = binding.key
+  try {
+    const data = await routingAPI.testRoute({
+      scope: 'tun',
+      domain,
+      port: 443,
+      network: 'tcp',
+      inboundTag: 'tun-in'
+    })
+    const result = data?.result || {}
+    const expectedTarget = `pool-active-${payload.nodeId}`
+    const actualTarget = result.outboundTag || result.balancerTag || ''
+    destinationBindingTestResults.value = {
+      ...destinationBindingTestResults.value,
+      [binding.key]: {
+        domain,
+        expectedTarget,
+        actualTarget,
+        matched: actualTarget === expectedTarget
+      }
+    }
+    if (actualTarget === expectedTarget) {
+      message.success(t('nodePool.destinationBindingTestMatched', { domain, target: actualTarget }))
+    } else {
+      message.warning(
+        t('nodePool.destinationBindingTestMismatch', {
+          domain,
+          expected: expectedTarget,
+          actual: actualTarget || '-'
+        })
+      )
+    }
+  } catch (err: any) {
+    message.error(err?.message || err?.error || t('common.error'))
+  } finally {
+    testingDestinationBindingKey.value = null
+  }
+}
+
 async function handleSaveTunSettings() {
   savingTunSettings.value = true
   try {
@@ -1851,16 +2106,19 @@ async function handleSaveTunSettings() {
       routeMode: tunSettingsForm.value.routeMode,
       remoteDns: normalizeListInput(tunRemoteDnsText.value),
       protectDomains: normalizeListInput(tunProtectDomainsText.value),
-      protectCidrs: normalizeListInput(tunProtectCidrsText.value)
+      protectCidrs: normalizeListInput(tunProtectCidrsText.value),
+      destinationBindings: destinationBindingDrafts.value.map(draftToBinding)
     })
     tunSettingsForm.value = {
       selectionPolicy: saved.selectionPolicy || 'fastest',
       routeMode: saved.routeMode || 'strict_proxy',
       remoteDns: Array.isArray(saved.remoteDns) ? saved.remoteDns : [],
       protectDomains: Array.isArray(saved.protectDomains) ? saved.protectDomains : [],
-      protectCidrs: Array.isArray(saved.protectCidrs) ? saved.protectCidrs : []
+      protectCidrs: Array.isArray(saved.protectCidrs) ? saved.protectCidrs : [],
+      destinationBindings: Array.isArray(saved.destinationBindings) ? saved.destinationBindings : []
     }
     syncTunSettingsTextAreas()
+    syncDestinationBindingDrafts(tunSettingsForm.value.destinationBindings)
     message.success(
       tunStatus.value.running
         ? t('nodePool.tunSettingsSavedRunning')
@@ -2081,6 +2339,48 @@ onBeforeUnmount(() => {
   margin-top: 4px;
 }
 
+.destination-binding-editor {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.destination-binding-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.destination-binding-card {
+  border-left: 3px solid color-mix(in srgb, var(--n-color-target, #2080f0) 45%, transparent);
+}
+
+.destination-binding-row {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.destination-binding-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.destination-binding-label {
+  font-size: 12px;
+  color: var(--n-text-color-3);
+}
+
+.destination-binding-warning {
+  color: var(--n-warning-color, #f0a020);
+}
+
+.destination-binding-test-alert {
+  margin-top: 4px;
+}
+
 @media (max-width: 1199px) {
   .summary-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2114,6 +2414,10 @@ onBeforeUnmount(() => {
 
   .pool-sort-select {
     width: 100%;
+  }
+
+  .destination-binding-row {
+    grid-template-columns: 1fr;
   }
 
   .event-row {
