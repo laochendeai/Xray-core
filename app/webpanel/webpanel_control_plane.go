@@ -267,7 +267,10 @@ func (wp *WebPanel) appendTunAggregationPrototype(status *TunStatus) {
 	}
 
 	attachTunAggregationPrototype(status.Aggregation, settings, wp.activePoolNodes(), time.Now())
+	attachTunAggregationRelayDiagnostics(status.Aggregation, settings, time.Now())
 	appendUniqueTunDiagnostic(status, formatTunAggregationPrototypeDiagnostic(status.Aggregation.Prototype))
+	appendUniqueTunDiagnostic(status, formatTunAggregationRelayDiagnostic(status.Aggregation.Relay))
+	appendUniqueTunDiagnostic(status, formatTunAggregationBenchmarkDiagnostic(status.Aggregation.Benchmark))
 }
 
 func (wp *WebPanel) appendTunRoutingDiagnostics(status *TunStatus) {
