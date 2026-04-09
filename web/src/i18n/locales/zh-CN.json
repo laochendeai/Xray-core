@@ -492,6 +492,20 @@
     "aggregationStatusTitle": "实验性 UDP/QUIC 聚合状态",
     "aggregationStatusSummary": "状态: {status}。请求路径: {requested}。当前生效路径: {effective}。原因: {reason}",
     "aggregationDisabledSummary": "实验性 UDP/QUIC 聚合当前关闭，透明模式继续使用稳定的单路径 balancer。",
+    "aggregationPrototypeTitle": "本地调度原型",
+    "aggregationPrototypeSummary": "候选路径: {candidates}。已选路径: {selected}。预览会话: {sessions}。TTL: {ttl} 秒。指标来源: {source}。",
+    "aggregationPrototypePathsTitle": "路径快照",
+    "aggregationPrototypeSessionsTitle": "预览会话",
+    "aggregationPrototypePathMetrics": "延迟 {latency}。丢包 {loss}。评分 {score}。最近探测 {checked}。",
+    "aggregationPrototypeSessionSummary": "已选路径: {selected}。候选路径: {candidates}。过期时间: {expires}。",
+    "aggregationPrototypeMetricSource": {
+      "node_pool_probe_history": "节点池探测历史"
+    },
+    "aggregationPrototypePathState": {
+      "selected": "已选中",
+      "standby": "待命",
+      "excluded": "已排除"
+    },
     "aggregationEnabled": "启用实验性 UDP/QUIC 聚合",
     "aggregationMode": "实验聚合模式",
     "aggregationModeOptions": {

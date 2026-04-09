@@ -166,17 +166,18 @@ type TunAggregationSettings struct {
 }
 
 type TunAggregationStatus struct {
-	Enabled            bool   `json:"enabled"`
-	Status             string `json:"status"`
-	RequestedPath      string `json:"requestedPath"`
-	EffectivePath      string `json:"effectivePath"`
-	Ready              bool   `json:"ready"`
-	RelayConfigured    bool   `json:"relayConfigured"`
-	Mode               string `json:"mode"`
-	MaxPathsPerSession int    `json:"maxPathsPerSession"`
-	SchedulerPolicy    string `json:"schedulerPolicy"`
-	RelayEndpoint      string `json:"relayEndpoint,omitempty"`
-	Reason             string `json:"reason"`
+	Enabled            bool                           `json:"enabled"`
+	Status             string                         `json:"status"`
+	RequestedPath      string                         `json:"requestedPath"`
+	EffectivePath      string                         `json:"effectivePath"`
+	Ready              bool                           `json:"ready"`
+	RelayConfigured    bool                           `json:"relayConfigured"`
+	Mode               string                         `json:"mode"`
+	MaxPathsPerSession int                            `json:"maxPathsPerSession"`
+	SchedulerPolicy    string                         `json:"schedulerPolicy"`
+	RelayEndpoint      string                         `json:"relayEndpoint,omitempty"`
+	Reason             string                         `json:"reason"`
+	Prototype          *TunAggregationPrototypeStatus `json:"prototype,omitempty"`
 }
 
 type TunFeatureSettings struct {
@@ -1256,14 +1257,14 @@ func (m *TunManager) generateRuntimeConfigLocked(settings *TunFeatureSettings, a
 	if err := os.WriteFile(settings.RuntimeConfigPath, runtimeConfig, 0644); err != nil {
 		return fmt.Errorf("write runtime config: %w", err)
 	}
-	if err := writeTunAggregationRuntimeState(settings); err != nil {
+	if err := writeTunAggregationRuntimeState(settings, activeNodes); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func writeTunAggregationRuntimeState(settings *TunFeatureSettings) error {
+func writeTunAggregationRuntimeState(settings *TunFeatureSettings, activeNodes []NodeRecord) error {
 	if settings == nil {
 		return nil
 	}
@@ -1272,6 +1273,7 @@ func writeTunAggregationRuntimeState(settings *TunFeatureSettings) error {
 	if runtimeState == nil {
 		return nil
 	}
+	attachTunAggregationPrototype(runtimeState, settings, activeNodes, time.Now())
 
 	raw, err := json.MarshalIndent(runtimeState, "", "  ")
 	if err != nil {
@@ -1852,7 +1854,7 @@ func buildTunAggregationStatus(settings *TunFeatureSettings) *TunAggregationStat
 	status.Status = string(TunAggregationStatusRequested)
 	status.Ready = true
 	status.RelayConfigured = true
-	status.Reason = "Experimental UDP/QUIC aggregation is configured behind the feature flag. Stage-one scaffolding keeps the effective path on stable single-path mode until the local scheduler and relay prototypes land."
+	status.Reason = "Experimental UDP/QUIC aggregation is configured behind the feature flag. The local scheduler/session prototype is available for diagnostics, but the effective transparent path stays on stable single-path mode until relay integration lands."
 	return status
 }
 

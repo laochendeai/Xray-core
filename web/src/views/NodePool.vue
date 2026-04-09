@@ -83,6 +83,81 @@
         <n-alert :type="aggregationStatusAlertType" :title="t('nodePool.aggregationStatusTitle')">
           {{ aggregationStatusSummary }}
         </n-alert>
+        <n-card v-if="aggregationPrototype" size="small" class="aggregation-prototype-card">
+          <n-space vertical :size="12">
+            <strong>{{ t('nodePool.aggregationPrototypeTitle') }}</strong>
+            <div class="node-pool-meta">
+              {{
+                t('nodePool.aggregationPrototypeSummary', {
+                  candidates: aggregationPrototype.candidatePathCount,
+                  selected: aggregationPrototype.selectedPathCount,
+                  sessions: aggregationPrototype.sessionCount,
+                  ttl: aggregationPrototype.sessionTtlSeconds,
+                  source: aggregationPrototypeMetricSourceLabel(aggregationPrototype.metricSource)
+                })
+              }}
+            </div>
+            <div v-if="aggregationPrototype.note" class="node-pool-meta">
+              {{ aggregationPrototype.note }}
+            </div>
+
+            <div v-if="aggregationPrototype.paths.length" class="aggregation-prototype-block">
+              <strong>{{ t('nodePool.aggregationPrototypePathsTitle') }}</strong>
+              <n-list bordered>
+                <n-list-item v-for="path in aggregationPrototype.paths" :key="path.nodeId">
+                  <div class="event-row">
+                    <div class="event-main">
+                      <n-space align="center" :size="8" wrap>
+                        <strong>{{ path.remark || path.nodeId }}</strong>
+                        <n-tag size="small" :type="aggregationPrototypePathStateTagType(path.state)">
+                          {{ aggregationPrototypePathStateLabel(path.state) }}
+                        </n-tag>
+                        <n-tag size="small">{{ path.outboundTag }}</n-tag>
+                      </n-space>
+                      <div class="node-pool-meta">
+                        {{
+                          t('nodePool.aggregationPrototypePathMetrics', {
+                            latency: aggregationLatencyLabel(path.latencyMs),
+                            loss: formatLossPct(path.lossPct),
+                            score: formatAggregationScore(path.score),
+                            checked: formatDateTime(path.lastCheckedAt) || '-'
+                          })
+                        }}
+                      </div>
+                      <div class="node-pool-meta">{{ path.reason }}</div>
+                    </div>
+                  </div>
+                </n-list-item>
+              </n-list>
+            </div>
+
+            <div v-if="aggregationPrototype.sessions.length" class="aggregation-prototype-block">
+              <strong>{{ t('nodePool.aggregationPrototypeSessionsTitle') }}</strong>
+              <n-list bordered>
+                <n-list-item v-for="session in aggregationPrototype.sessions" :key="session.sessionId">
+                  <div class="event-row">
+                    <div class="event-main">
+                      <n-space align="center" :size="8" wrap>
+                        <strong>{{ session.flow }}</strong>
+                        <n-tag size="small">{{ aggregationSchedulerPolicyLabel(session.schedulerPolicy) }}</n-tag>
+                      </n-space>
+                      <div class="node-pool-meta">
+                        {{
+                          t('nodePool.aggregationPrototypeSessionSummary', {
+                            selected: formatPathIds(session.selectedPathIds),
+                            candidates: formatPathIds(session.candidatePathIds),
+                            expires: formatDateTime(session.expiresAt) || '-'
+                          })
+                        }}
+                      </div>
+                      <div class="node-pool-meta">{{ session.reason }}</div>
+                    </div>
+                  </div>
+                </n-list-item>
+              </n-list>
+            </div>
+          </n-space>
+        </n-card>
         <n-form :model="tunSettingsForm" label-placement="left" label-width="220px">
           <n-form-item :label="t('nodePool.aggregationEnabled')">
             <n-switch v-model:value="tunSettingsForm.aggregation.enabled" />
@@ -954,6 +1029,8 @@ import type {
   NodeRecord,
   NodeStatus,
   TunAggregationMode,
+  TunAggregationPrototypePathState,
+  TunAggregationPrototypeStatus,
   TunAggregationSchedulerPolicy,
   TunAggregationSettings,
   TunAggregationStatus,
@@ -1030,7 +1107,31 @@ function createDefaultAggregationStatus(): TunAggregationStatus {
     maxPathsPerSession: defaults.maxPathsPerSession,
     schedulerPolicy: defaults.schedulerPolicy,
     relayEndpoint: '',
-    reason: ''
+    reason: '',
+    prototype: undefined
+  }
+}
+
+function createDefaultAggregationPrototype(): TunAggregationPrototypeStatus {
+  return {
+    ready: false,
+    metricSource: 'node_pool_probe_history',
+    sessionTtlSeconds: 45,
+    candidatePathCount: 0,
+    selectedPathCount: 0,
+    sessionCount: 0,
+    paths: [],
+    sessions: []
+  }
+}
+
+function normalizeAggregationPrototype(value?: Partial<TunAggregationPrototypeStatus>): TunAggregationPrototypeStatus {
+  const base = createDefaultAggregationPrototype()
+  return {
+    ...base,
+    ...value,
+    paths: Array.isArray(value?.paths) ? value!.paths : [],
+    sessions: Array.isArray(value?.sessions) ? value!.sessions : []
   }
 }
 
@@ -1039,7 +1140,8 @@ function normalizeAggregationStatus(value?: Partial<TunAggregationStatus>): TunA
   return {
     ...base,
     ...value,
-    relayEndpoint: (value?.relayEndpoint || '').trim()
+    relayEndpoint: (value?.relayEndpoint || '').trim(),
+    prototype: value?.prototype ? normalizeAggregationPrototype(value.prototype) : undefined
   }
 }
 
@@ -1391,6 +1493,29 @@ function aggregationPathLabel(path?: TunAggregationRuntimePath) {
   return translateCode('nodePool.aggregationPath', path || 'stable_single_path')
 }
 
+function aggregationSchedulerPolicyLabel(policy?: TunAggregationSchedulerPolicy) {
+  return translateCode('nodePool.aggregationSchedulerPolicyOptions', policy || 'weighted_split')
+}
+
+function aggregationPrototypeMetricSourceLabel(source?: string) {
+  return translateCode('nodePool.aggregationPrototypeMetricSource', source || 'node_pool_probe_history')
+}
+
+function aggregationPrototypePathStateLabel(state?: TunAggregationPrototypePathState) {
+  return translateCode('nodePool.aggregationPrototypePathState', state || 'excluded')
+}
+
+function aggregationPrototypePathStateTagType(state?: TunAggregationPrototypePathState) {
+  switch (state) {
+    case 'selected':
+      return 'success'
+    case 'standby':
+      return 'info'
+    default:
+      return 'default'
+  }
+}
+
 function statusTagType(status: NodeStatus) {
   switch (status) {
     case 'active':
@@ -1446,6 +1571,24 @@ function failRateLabel(node: NodeRecord) {
 
 function delayLabel(node: NodeRecord) {
   return node.avgDelayMs > 0 ? `${node.avgDelayMs}ms` : t('nodePool.delayUnknown')
+}
+
+function aggregationLatencyLabel(latencyMs?: number) {
+  return latencyMs && latencyMs > 0 ? `${latencyMs}ms` : '-'
+}
+
+function formatLossPct(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return `${value.toFixed(1)}%`
+}
+
+function formatAggregationScore(value?: number) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+  return value.toFixed(1)
+}
+
+function formatPathIds(values?: string[]) {
+  return Array.isArray(values) && values.length ? values.join(', ') : '-'
 }
 
 function nodeExitIpHeadline(node: NodeRecord) {
@@ -1942,6 +2085,11 @@ const aggregationStatusSummary = computed(() => {
     effective: aggregationPathLabel(aggregation.effectivePath),
     reason: aggregation.reason || t('nodePool.aggregationDisabledSummary')
   })
+})
+
+const aggregationPrototype = computed(() => {
+  const prototype = tunStatus.value.aggregation?.prototype
+  return prototype ? normalizeAggregationPrototype(prototype) : null
 })
 
 async function refreshAll() {
@@ -2505,6 +2653,16 @@ onBeforeUnmount(() => {
 
 .node-card-actions {
   margin-top: 4px;
+}
+
+.aggregation-prototype-card {
+  width: 100%;
+}
+
+.aggregation-prototype-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .destination-binding-editor {

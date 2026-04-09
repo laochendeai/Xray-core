@@ -402,6 +402,70 @@ func TestTunStatusSnapshotIncludesRoutingDiagnostics(t *testing.T) {
 	}
 }
 
+func TestTunStatusSnapshotIncludesAggregationPrototype(t *testing.T) {
+	t.Parallel()
+
+	wp, _ := newTestControlPlaneWebPanel(t)
+	defer wp.subManager.Stop()
+
+	checkedAt := time.Now().Add(-1 * time.Minute)
+	wp.subManager.mu.Lock()
+	wp.subManager.state.Nodes = []NodeRecord{{
+		ID:            "node-1",
+		URI:           mustGenerateTunTestURI(t, "203.0.113.81"),
+		Remark:        "node-1",
+		Protocol:      "vmess",
+		Address:       "203.0.113.81",
+		Port:          443,
+		Status:        NodeStatusActive,
+		AddedAt:       time.Now(),
+		AvgDelayMs:    32,
+		TotalPings:    10,
+		LastCheckedAt: &checkedAt,
+	}}
+	wp.subManager.mu.Unlock()
+
+	config := map[string]any{}
+	raw, err := os.ReadFile(wp.config.ConfigPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	webpanel := config["webpanel"].(map[string]any)
+	tun := webpanel["tun"].(map[string]any)
+	tun["aggregation"] = map[string]any{
+		"enabled":            true,
+		"mode":               "single_best",
+		"maxPathsPerSession": 2,
+		"schedulerPolicy":    "single_best",
+	}
+	updatedRaw, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("encode config: %v", err)
+	}
+	if err := os.WriteFile(wp.config.ConfigPath, updatedRaw, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	status := wp.tunStatusSnapshot()
+	if status == nil || status.Aggregation == nil || status.Aggregation.Prototype == nil {
+		t.Fatalf("expected aggregation prototype in status snapshot, got %#v", status)
+	}
+	if status.Aggregation.Prototype.CandidatePathCount != 1 {
+		t.Fatalf("expected one candidate path, got %#v", status.Aggregation.Prototype)
+	}
+	if status.Aggregation.Prototype.SelectedPathCount != 1 {
+		t.Fatalf("expected one selected path, got %#v", status.Aggregation.Prototype)
+	}
+
+	diagnostics := strings.Join(status.Diagnostics, "\n")
+	if !strings.Contains(diagnostics, "Aggregation prototype: candidates=1 selected=1 sessions=1") {
+		t.Fatalf("expected prototype diagnostic in status output\n%s", diagnostics)
+	}
+}
+
 type controlPlaneTestPaths struct {
 	stateDir          string
 	helperStatePath   string
