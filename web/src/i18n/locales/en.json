@@ -48,7 +48,8 @@
     "settings": "Settings",
     "config": "Config",
     "subscriptions": "Subscriptions",
-    "nodePool": "Node Pool"
+    "nodePool": "Node Pool",
+    "support": "Support"
   },
   "dashboard": {
     "systemInfo": "System Info",
@@ -70,6 +71,7 @@
     "upToDate": "Up to Date",
     "updateCheckUnavailable": "Check Failed",
     "updateStatusStale": "Cached Result",
+    "supportAuthor": "Support Author",
     "goroutines": "Goroutines",
     "memory": "Memory",
     "gcCount": "GC Count",
@@ -396,6 +398,26 @@
       "url": "Remote URL",
       "manual": "Manual Paste",
       "file": "Local File"
+    }
+  },
+  "support": {
+    "subtitle": "If this fork helps with subscriptions, node-pool operations, transparent proxy control, or the panel workflow, you can support ongoing maintenance through Afdian.",
+    "openPage": "Open Afdian Page",
+    "copyLink": "Copy Support Link",
+    "platformLabel": "Channel",
+    "platformName": "Afdian",
+    "routeLabel": "Panel Route",
+    "addressLabel": "Profile URL",
+    "channelTitle": "Current Support Channel",
+    "channelBody": "The built-in channel uses Afdian, which is easier for mainland China users. Open the page directly or scan the QR code; no extra plugin is required.",
+    "qrcodeTitle": "Scan To Support",
+    "qrcodeHint": "Scan with your phone to open the Afdian page directly.",
+    "fundsTitle": "Support goes to",
+    "noPressure": "There are no popups and no functional gating. You only see this entry when you open the page yourself.",
+    "funds": {
+      "runtime": "Keeping transparent proxying, node-pool logic, subscription import, and protocol compatibility maintained.",
+      "ui": "Polishing WebPanel light/dark themes, information density, and everyday usability details.",
+      "docs": "Updating real-world docs, UI guides, release notes, and regression verification records."
     }
   },
   "nodePool": {

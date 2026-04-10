@@ -1,146 +1,153 @@
 <template>
-  <n-space vertical :size="24">
-    <n-grid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
-      <n-gi span="4 m:1">
-        <n-card size="small">
-          <n-statistic :label="t('dashboard.uptime')">
-            <template #default>{{ sysStats ? formatUptime(sysStats.uptime) : '-' }}</template>
-          </n-statistic>
+  <div class="page-shell dashboard-page">
+    <section class="dashboard-hero">
+      <div class="dashboard-hero-copy">
+        <p class="dashboard-eyebrow">Xray Panel</p>
+        <div class="dashboard-headline">
+          <h1 class="dashboard-title">{{ t('nav.dashboard') }}</h1>
+          <n-tag :type="readinessOverview.type" round size="small">
+            {{ readinessOverview.badgeLabel }}
+          </n-tag>
+        </div>
+        <p class="dashboard-summary">{{ readinessOverview.description }}</p>
+        <n-space class="dashboard-actions" :size="12" wrap>
+          <n-button secondary @click="router.push('/readiness')">
+            {{ t('dashboard.openReadiness') }}
+          </n-button>
+          <n-button secondary @click="router.push('/support')">
+            {{ t('dashboard.supportAuthor') }}
+          </n-button>
+          <n-button @click="fetchUpdateStatus(true)" :loading="loadingUpdate">
+            {{ t('dashboard.checkUpdates') }}
+          </n-button>
+        </n-space>
+      </div>
+
+      <div class="dashboard-metrics">
+        <div class="dashboard-metric-card">
+          <span class="dashboard-metric-label">{{ t('dashboard.uptime') }}</span>
+          <strong class="dashboard-metric-value">{{ sysStats ? formatUptime(sysStats.uptime) : '-' }}</strong>
+        </div>
+        <div class="dashboard-metric-card">
+          <span class="dashboard-metric-label">{{ t('dashboard.goroutines') }}</span>
+          <strong class="dashboard-metric-value">{{ sysStats?.numGoroutine ?? '-' }}</strong>
+        </div>
+        <div class="dashboard-metric-card">
+          <span class="dashboard-metric-label">{{ t('dashboard.memory') }}</span>
+          <strong class="dashboard-metric-value">{{ sysStats ? formatBytes(sysStats.alloc) : '-' }}</strong>
+        </div>
+        <div class="dashboard-metric-card">
+          <span class="dashboard-metric-label">{{ t('dashboard.onlineUsers') }}</span>
+          <strong class="dashboard-metric-value">{{ statsStore.onlineCount }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <n-grid :cols="2" :x-gap="18" :y-gap="18" responsive="screen" item-responsive>
+      <n-gi span="2 m:1">
+        <n-card :title="t('dashboard.readinessTitle')" size="small" :bordered="false" class="dashboard-panel">
+          <template #header-extra>
+            <n-tag :type="readinessOverview.type" size="small">
+              {{ readinessOverview.badgeLabel }}
+            </n-tag>
+          </template>
+
+          <n-space vertical :size="14">
+            <n-alert :type="readinessOverview.type">
+              {{ readinessOverview.description }}
+            </n-alert>
+
+            <n-grid :cols="3" :x-gap="12" responsive="screen" item-responsive>
+              <n-gi span="3 m:1">
+                <n-statistic :label="t('readiness.cards.blocking')">
+                  <template #default>{{ readiness?.blockingCount ?? '-' }}</template>
+                </n-statistic>
+              </n-gi>
+              <n-gi span="3 m:1">
+                <n-statistic :label="t('readiness.cards.warning')">
+                  <template #default>{{ readiness?.warningCount ?? '-' }}</template>
+                </n-statistic>
+              </n-gi>
+              <n-gi span="3 m:1">
+                <n-statistic :label="t('readiness.cards.checks')">
+                  <template #default>{{ readiness?.checks.length ?? '-' }}</template>
+                </n-statistic>
+              </n-gi>
+            </n-grid>
+          </n-space>
         </n-card>
       </n-gi>
-      <n-gi span="4 m:1">
-        <n-card size="small">
-          <n-statistic :label="t('dashboard.goroutines')">
-            <template #default>{{ sysStats?.numGoroutine ?? '-' }}</template>
-          </n-statistic>
-        </n-card>
-      </n-gi>
-      <n-gi span="4 m:1">
-        <n-card size="small">
-          <n-statistic :label="t('dashboard.memory')">
-            <template #default>{{ sysStats ? formatBytes(sysStats.alloc) : '-' }}</template>
-          </n-statistic>
-        </n-card>
-      </n-gi>
-      <n-gi span="4 m:1">
-        <n-card size="small">
-          <n-statistic :label="t('dashboard.onlineUsers')">
-            <template #default>{{ statsStore.onlineCount }}</template>
-          </n-statistic>
+
+      <n-gi span="2 m:1">
+        <n-card :title="t('dashboard.updateStatusTitle')" size="small" :bordered="false" class="dashboard-panel">
+          <template #header-extra>
+            <n-tag :type="updateBadge.type" size="small">
+              {{ updateBadge.label }}
+            </n-tag>
+          </template>
+
+          <n-space vertical :size="14">
+            <n-alert type="info">
+              {{ t('dashboard.updateHint') }}
+            </n-alert>
+
+            <n-descriptions bordered :column="1" size="small">
+              <n-descriptions-item :label="t('dashboard.currentVersion')">
+                {{ updateStatus?.currentVersion || '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item :label="t('dashboard.latestVersion')">
+                {{ updateStatus?.latestVersion || '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item :label="t('dashboard.releaseSource')">
+                {{ updateStatus?.source || '-' }}
+              </n-descriptions-item>
+              <n-descriptions-item :label="t('dashboard.releaseDate')">
+                {{ formatDateTime(updateStatus?.latestPublishedAt) }}
+              </n-descriptions-item>
+              <n-descriptions-item :label="t('dashboard.lastChecked')">
+                {{ formatDateTime(updateStatus?.checkedAt) }}
+              </n-descriptions-item>
+              <n-descriptions-item :label="t('dashboard.releasePage')">
+                <a
+                  v-if="updateStatus?.latestReleaseUrl"
+                  :href="updateStatus.latestReleaseUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ t('dashboard.openReleasePage') }}
+                </a>
+                <span v-else>-</span>
+              </n-descriptions-item>
+            </n-descriptions>
+
+            <n-alert v-if="updateStatus?.message" :type="updateStatus.status === 'error' ? 'error' : 'warning'">
+              {{ updateStatus.message }}
+            </n-alert>
+          </n-space>
         </n-card>
       </n-gi>
     </n-grid>
 
-    <n-card :title="t('dashboard.readinessTitle')" size="small">
-      <template #header-extra>
-        <n-space align="center" :size="12">
-          <n-tag :type="readinessOverview.type" size="small">
-            {{ readinessOverview.badgeLabel }}
-          </n-tag>
-          <n-button size="small" tertiary @click="router.push('/readiness')">
-            {{ t('dashboard.openReadiness') }}
-          </n-button>
-        </n-space>
-      </template>
-
-      <n-space vertical :size="12">
-        <n-alert :type="readinessOverview.type">
-          {{ readinessOverview.description }}
-        </n-alert>
-
-        <n-grid :cols="3" :x-gap="12" responsive="screen" item-responsive>
-          <n-gi span="3 m:1">
-            <n-statistic :label="t('readiness.cards.blocking')">
-              <template #default>{{ readiness?.blockingCount ?? '-' }}</template>
-            </n-statistic>
-          </n-gi>
-          <n-gi span="3 m:1">
-            <n-statistic :label="t('readiness.cards.warning')">
-              <template #default>{{ readiness?.warningCount ?? '-' }}</template>
-            </n-statistic>
-          </n-gi>
-          <n-gi span="3 m:1">
-            <n-statistic :label="t('readiness.cards.checks')">
-              <template #default>{{ readiness?.checks.length ?? '-' }}</template>
-            </n-statistic>
-          </n-gi>
-        </n-grid>
-      </n-space>
-    </n-card>
-
-    <n-card :title="t('dashboard.updateStatusTitle')" size="small">
-      <template #header-extra>
-        <n-space align="center" :size="12">
-          <n-tag :type="updateBadge.type" size="small">
-            {{ updateBadge.label }}
-          </n-tag>
-          <n-button size="small" @click="fetchUpdateStatus(true)" :loading="loadingUpdate">
-            {{ t('dashboard.checkUpdates') }}
-          </n-button>
-        </n-space>
-      </template>
-
-      <n-space vertical :size="12">
-        <n-alert type="info">
-          {{ t('dashboard.updateHint') }}
-        </n-alert>
-
-        <n-descriptions bordered :column="1" size="small">
-          <n-descriptions-item :label="t('dashboard.currentVersion')">
-            {{ updateStatus?.currentVersion || '-' }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('dashboard.latestVersion')">
-            {{ updateStatus?.latestVersion || '-' }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('dashboard.releaseSource')">
-            {{ updateStatus?.source || '-' }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('dashboard.releaseDate')">
-            {{ formatDateTime(updateStatus?.latestPublishedAt) }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('dashboard.lastChecked')">
-            {{ formatDateTime(updateStatus?.checkedAt) }}
-          </n-descriptions-item>
-          <n-descriptions-item :label="t('dashboard.releasePage')">
-            <a
-              v-if="updateStatus?.latestReleaseUrl"
-              :href="updateStatus.latestReleaseUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {{ t('dashboard.openReleasePage') }}
-            </a>
-            <span v-else>-</span>
-          </n-descriptions-item>
-        </n-descriptions>
-
-        <n-alert v-if="updateStatus?.message" :type="updateStatus.status === 'error' ? 'error' : 'warning'">
-          {{ updateStatus.message }}
-        </n-alert>
-      </n-space>
-    </n-card>
-
-    <n-grid :cols="2" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
+    <n-grid :cols="2" :x-gap="18" :y-gap="18" responsive="screen" item-responsive>
       <n-gi span="2 m:1">
-        <n-card :title="t('dashboard.trafficOverview')" size="small">
-          <n-space vertical>
+        <n-card :title="t('dashboard.trafficOverview')" size="small" :bordered="false" class="dashboard-panel">
+          <n-space vertical :size="12">
             <div>{{ t('dashboard.totalUpload') }}: <strong>{{ formatBytes(totalUplink) }}</strong></div>
             <div>{{ t('dashboard.totalDownload') }}: <strong>{{ formatBytes(totalDownlink) }}</strong></div>
           </n-space>
         </n-card>
       </n-gi>
       <n-gi span="2 m:1">
-        <n-card :title="t('dashboard.realtimeTraffic')" size="small">
-          <v-chart :option="trafficChartOption" autoresize style="height: 200px" />
+        <n-card :title="t('dashboard.realtimeTraffic')" size="small" :bordered="false" class="dashboard-panel">
+          <v-chart :option="trafficChartOption" autoresize class="dashboard-chart" />
         </n-card>
       </n-gi>
     </n-grid>
 
-    <!-- Top Users -->
-    <n-card :title="t('dashboard.topUsers')" size="small">
+    <n-card :title="t('dashboard.topUsers')" size="small" :bordered="false" class="dashboard-panel dashboard-table">
       <n-data-table :columns="topUserColumns" :data="topUsers" :pagination="false" size="small" />
     </n-card>
-  </n-space>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -329,3 +336,156 @@ onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
 })
 </script>
+
+<style scoped>
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.dashboard-hero {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  gap: 24px;
+  padding: clamp(22px, 3vw, 36px);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius-xl);
+  background: var(--panel-surface);
+  box-shadow: var(--panel-shadow);
+  color: var(--panel-text);
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.95fr);
+}
+
+.dashboard-hero::after {
+  display: none;
+  content: "";
+}
+
+.dashboard-hero-copy {
+  position: relative;
+  z-index: 1;
+}
+
+.dashboard-eyebrow {
+  margin: 0 0 12px;
+  color: var(--panel-text-3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.dashboard-headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-title {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.dashboard-summary {
+  max-width: 44rem;
+  margin: 14px 0 0;
+  color: var(--panel-text-2);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.dashboard-actions {
+  margin-top: 22px;
+}
+
+.dashboard-metrics {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-self: end;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboard-metric-card {
+  display: flex;
+  min-height: 118px;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  background: var(--panel-surface-soft);
+}
+
+.dashboard-metric-label {
+  color: var(--panel-text-3);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dashboard-metric-value {
+  font-size: clamp(1.25rem, 2vw, 1.9rem);
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.dashboard-panel {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius-xl);
+  background: var(--panel-surface);
+  box-shadow: var(--panel-shadow);
+}
+
+.dashboard-chart {
+  height: 240px;
+}
+
+:deep(.dashboard-panel > .n-card-header) {
+  padding: 22px 24px 0;
+}
+
+:deep(.dashboard-panel > .n-card__content) {
+  padding: 18px 24px 24px;
+}
+
+:deep(.dashboard-panel .n-alert) {
+  border-radius: 16px;
+}
+
+:deep(.dashboard-table .n-data-table-wrapper) {
+  overflow: hidden;
+  border-radius: 18px;
+}
+
+@media (max-width: 1080px) {
+  .dashboard-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-hero {
+    padding: 20px;
+    border-radius: 26px;
+  }
+
+  .dashboard-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  :deep(.dashboard-panel > .n-card-header) {
+    padding: 18px 18px 0;
+  }
+
+  :deep(.dashboard-panel > .n-card__content) {
+    padding: 16px 18px 18px;
+  }
+}
+</style>

@@ -11,6 +11,35 @@ The upstream project remains [Project X](https://github.com/XTLS). Upstream READ
 - Node pool lifecycle with candidate, validation, active, quarantine, and removed states
 - Transparent proxy / TUN controls with direct-vs-proxy policy, remote DNS list, and clean restore
 - Dashboard update discovery against upstream releases
+- Compact node intelligence tags with hover details instead of always-expanded diagnostics
+- Consistent light/dark panel styling across login, dashboard, subscriptions, and node pool views
+- Built-in support page with Afdian link and QR code for direct appreciation
+
+## WebPanel Interface
+
+The WebPanel is still shipped inside the Xray binary. There is no separate frontend service to deploy, and the embedded UI now exposes the main operational paths directly from the sidebar.
+
+![WebPanel dashboard overview](docs/readme/dashboard-overview-light.png)
+
+| Area | What it handles |
+| --- | --- |
+| Dashboard | Runtime health, readiness summary, release check, traffic overview, and quick entry points |
+| Readiness | Blocking checks for config, subscriptions, node pool, TUN, and update state |
+| Subscriptions | Remote URL, manual paste, and local file imports with refresh control |
+| Node Pool | Candidate, staging, active, quarantine, removed pools plus transparent-mode controls |
+| Support | Built-in appreciation page with Afdian link, QR code, and a stable `/support` route |
+
+For the full route-by-route page reference, see [`web/README.md`](web/README.md).
+
+## Support This Fork
+
+This fork now includes a built-in support entry inside the WebPanel sidebar and dashboard quick actions.
+
+- Afdian: <https://ifdian.net/a/abc678>
+- Panel route: `/support`
+- Built-in QR code: available on the support page for phone scanning
+
+![WebPanel support page](docs/readme/support-page-light.png)
 
 ## Documentation Map
 
@@ -26,7 +55,7 @@ The upstream project remains [Project X](https://github.com/XTLS). Upstream READ
 
 The upstream [README](https://github.com/XTLS/Xray-core#readme) is open, so feel free to submit your project [here](https://github.com/XTLS/Xray-core/pulls).
 
-## Sponsors
+## Upstream Sponsors
 
 [![Remnawave](https://github.com/user-attachments/assets/a22d34ae-01ee-441c-843a-85356748ed1e)](https://docs.rw)
 
@@ -34,7 +63,7 @@ The upstream [README](https://github.com/XTLS/Xray-core#readme) is open, so feel
 
 [**Sponsor Xray-core**](https://github.com/XTLS/Xray-core/issues/3668)
 
-## Donation & NFTs
+## Upstream Donation & NFTs
 
 ### [Collect a Project X NFT to support the development of Project X!](https://opensea.io/item/ethereum/0x5ee362866001613093361eb8569d59c4141b76d1/1)
 
@@ -214,7 +243,7 @@ Release packaging workflows in [`.github/workflows/release.yml`](.github/workflo
 
 ### Release Matrix
 
-The matrix below describes what the current release workflows produce. It reflects the workflow definitions in [`.github/workflows/release.yml`](.github/workflows/release.yml), [`.github/workflows/release-win7.yml`](.github/workflows/release-win7.yml), and [`.github/workflows/docker.yml`](.github/workflows/docker.yml). Existing zip examples are based on release `webpanel-v1.3.0`; the Windows installer entry reflects the workflow added on this branch.
+The matrix below describes what the current release workflows produce. It reflects the workflow definitions in [`.github/workflows/release.yml`](.github/workflows/release.yml), [`.github/workflows/release-win7.yml`](.github/workflows/release-win7.yml), and [`.github/workflows/docker.yml`](.github/workflows/docker.yml). Existing zip examples are based on release `v2026.4.10`; the Windows installer entry reflects the workflow added on this branch.
 
 #### Binary Packages
 

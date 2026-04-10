@@ -25,7 +25,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings', name: 'Settings', component: () => import('@/views/Settings.vue') },
       { path: 'config', name: 'Config', component: () => import('@/views/Config.vue') },
       { path: 'subscriptions', name: 'Subscriptions', component: () => import('@/views/Subscriptions.vue') },
-      { path: 'node-pool', name: 'NodePool', component: () => import('@/views/NodePool.vue') }
+      { path: 'node-pool', name: 'NodePool', component: () => import('@/views/NodePool.vue') },
+      { path: 'support', name: 'Support', component: () => import('@/views/Support.vue') }
     ]
   }
 ]

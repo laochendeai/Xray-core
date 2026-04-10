@@ -1,17 +1,34 @@
 <template>
-  <n-space vertical :size="16">
-    <n-space justify="space-between" align="center">
-      <h2>{{ t('subscriptions.title') }}</h2>
-      <n-button type="primary" @click="openAddDialog">{{ t('subscriptions.addSubscription') }}</n-button>
-    </n-space>
+  <div class="page-shell subscriptions-page">
+    <section class="subscriptions-surface">
+      <div class="subscriptions-head">
+        <div class="subscriptions-title-block">
+          <h1 class="subscriptions-title">{{ t('subscriptions.title') }}</h1>
+          <div class="subscriptions-summary">
+            <n-tag
+              v-for="item in sourceSummaryItems"
+              :key="item.value"
+              :type="item.type"
+              round
+              size="small"
+            >
+              {{ item.label }} {{ item.count }}
+            </n-tag>
+          </div>
+        </div>
+        <n-button type="primary" @click="openAddDialog">{{ t('subscriptions.addSubscription') }}</n-button>
+      </div>
 
-    <n-data-table :columns="columns" :data="subscriptions" :loading="loading" :pagination="{ pageSize: 20 }" />
+      <div class="subscriptions-table-wrap">
+        <n-data-table :columns="columns" :data="subscriptions" :loading="loading" :pagination="{ pageSize: 20 }" />
+      </div>
+    </section>
 
     <n-modal
       :show="showDialog"
       preset="dialog"
       :title="dialogTitle"
-      style="width: 640px"
+      style="width: min(640px, calc(100vw - 24px))"
       @update:show="handleDialogVisibilityChange"
     >
       <n-form :model="form" label-placement="left" label-width="auto">
@@ -77,7 +94,7 @@
         <n-button type="primary" :loading="saving" @click="handleSubmit">{{ submitLabel }}</n-button>
       </template>
     </n-modal>
-  </n-space>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -150,6 +167,17 @@ const sourceTypeOptions = computed(() => [
   { label: t('subscriptions.sourceTypeOptions.manual'), value: 'manual' as SubscriptionSourceType },
   { label: t('subscriptions.sourceTypeOptions.file'), value: 'file' as SubscriptionSourceType }
 ])
+
+const sourceSummaryItems = computed(() =>
+  sourceTypeOptions.value
+    .map(option => ({
+      label: String(option.label),
+      value: option.value,
+      count: subscriptions.value.filter(item => item.sourceType === option.value).length,
+      type: sourceTypeTagType(option.value)
+    }))
+    .filter(item => item.count > 0)
+)
 
 const columns: DataTableColumns<SubscriptionRecord> = [
   { title: () => t('subscriptions.remark'), key: 'remark', width: 150 },
@@ -267,11 +295,11 @@ function sourceTypeLabel(sourceType: SubscriptionSourceType) {
 function sourceTypeTagType(sourceType: SubscriptionSourceType) {
   switch (sourceType) {
     case 'manual':
-      return 'warning'
+      return 'warning' as const
     case 'file':
-      return 'info'
+      return 'info' as const
     default:
-      return 'success'
+      return 'success' as const
   }
 }
 
@@ -467,8 +495,51 @@ fetchSubscriptions()
 </script>
 
 <style scoped>
-h2 {
+.subscriptions-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.subscriptions-surface {
+  padding: clamp(18px, 2.4vw, 30px);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--panel-radius-xl);
+  background: var(--panel-surface);
+  box-shadow: var(--panel-shadow);
+}
+
+.subscriptions-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.subscriptions-title-block {
+  min-width: 0;
+}
+
+.subscriptions-title {
   margin: 0;
+  font-size: clamp(1.7rem, 2.8vw, 2.2rem);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.subscriptions-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.subscriptions-table-wrap {
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+  border-radius: 22px;
+  background: var(--panel-surface-soft);
 }
 
 .hidden-file-input {
@@ -480,7 +551,28 @@ h2 {
 }
 
 .file-import-meta {
-  color: var(--n-text-color-3);
+  color: var(--panel-text-3);
   font-size: 13px;
+}
+
+:deep(.subscriptions-table-wrap .n-data-table-wrapper) {
+  overflow: hidden;
+}
+
+:deep(.subscriptions-table-wrap .n-data-table-th) {
+  background: var(--panel-surface-soft);
+}
+
+:deep(.subscriptions-table-wrap .n-data-table-td),
+:deep(.subscriptions-table-wrap .n-data-table-th) {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+@media (max-width: 768px) {
+  .subscriptions-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>
