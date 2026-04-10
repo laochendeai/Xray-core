@@ -48,7 +48,8 @@
     "settings": "系统设置",
     "config": "配置管理",
     "subscriptions": "订阅管理",
-    "nodePool": "节点池"
+    "nodePool": "节点池",
+    "support": "赞赏支持"
   },
   "dashboard": {
     "systemInfo": "系统信息",
@@ -70,6 +71,7 @@
     "upToDate": "已是最新",
     "updateCheckUnavailable": "检查失败",
     "updateStatusStale": "缓存结果",
+    "supportAuthor": "赞赏作者",
     "goroutines": "协程数",
     "memory": "内存占用",
     "gcCount": "GC 次数",
@@ -396,6 +398,26 @@
       "url": "远程 URL",
       "manual": "手工粘贴",
       "file": "本地文件"
+    }
+  },
+  "support": {
+    "subtitle": "如果这个 fork 在订阅管理、节点池、透明代理和面板体验上帮到了你，可以通过爱发电支持后续维护。",
+    "openPage": "打开爱发电主页",
+    "copyLink": "复制赞赏链接",
+    "platformLabel": "支持渠道",
+    "platformName": "爱发电",
+    "routeLabel": "面板入口",
+    "addressLabel": "主页链接",
+    "channelTitle": "当前支持方式",
+    "channelBody": "当前内置的是中国大陆用户更容易使用的爱发电入口，直接打开链接或扫码即可，不需要额外插件。",
+    "qrcodeTitle": "扫码赞赏",
+    "qrcodeHint": "手机扫码后可直接进入爱发电主页。",
+    "fundsTitle": "赞赏会优先用于",
+    "noPressure": "不会弹窗打扰，也不会影响任何功能；只有你主动打开这个页面时才会看到赞赏入口。",
+    "funds": {
+      "runtime": "继续维护透明代理、节点池、订阅导入和协议兼容性等核心能力。",
+      "ui": "持续打磨 WebPanel 的亮色 / 暗色主题、信息密度和可用性细节。",
+      "docs": "补齐真实使用文档、界面说明、发版说明和回归验证记录。"
     }
   },
   "nodePool": {

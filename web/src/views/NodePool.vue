@@ -594,32 +594,31 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
-            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
-            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
-              {{ nodeExitIpMeta(node) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
-              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
-              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
-            </div>
-            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
-              {{ nodeIntelligenceDetailLine(node) }}
-            </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
-              <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
-                {{ cleanlinessLabel(node.cleanliness) }}
-              </n-tag>
-              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
-                {{ networkTypeLabel(node.networkType) }}
-              </n-tag>
-              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                {{ exitIpStatusLabel(node.exitIpStatus) }}
-              </n-tag>
+              <n-popover trigger="hover" placement="top-start">
+                <template #trigger>
+                  <n-space :size="8" wrap class="node-intelligence-trigger">
+                    <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
+                      {{ cleanlinessLabel(node.cleanliness) }}
+                    </n-tag>
+                    <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                      {{ networkTypeLabel(node.networkType) }}
+                    </n-tag>
+                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                      {{ exitIpStatusLabel(node.exitIpStatus) }}
+                    </n-tag>
+                  </n-space>
+                </template>
+                <div class="node-intelligence-popover">
+                  <div class="node-intelligence-popover-title">{{ t('nodePool.intelligenceLabel') }}</div>
+                  <div v-for="(line, index) in nodeIntelligencePopoverLines(node)" :key="`${node.id}-active-${index}`" class="node-intelligence-popover-line">
+                    {{ line }}
+                  </div>
+                </div>
+              </n-popover>
               <n-tag size="small">{{ delayLabel(node) }}</n-tag>
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
             </n-space>
@@ -690,32 +689,31 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
-            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
-            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
-              {{ nodeExitIpMeta(node) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
-              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
-              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
-            </div>
-            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
-              {{ nodeIntelligenceDetailLine(node) }}
-            </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
-              <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
-                {{ cleanlinessLabel(node.cleanliness) }}
-              </n-tag>
-              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
-                {{ networkTypeLabel(node.networkType) }}
-              </n-tag>
-              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                {{ exitIpStatusLabel(node.exitIpStatus) }}
-              </n-tag>
+              <n-popover trigger="hover" placement="top-start">
+                <template #trigger>
+                  <n-space :size="8" wrap class="node-intelligence-trigger">
+                    <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
+                      {{ cleanlinessLabel(node.cleanliness) }}
+                    </n-tag>
+                    <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                      {{ networkTypeLabel(node.networkType) }}
+                    </n-tag>
+                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                      {{ exitIpStatusLabel(node.exitIpStatus) }}
+                    </n-tag>
+                  </n-space>
+                </template>
+                <div class="node-intelligence-popover">
+                  <div class="node-intelligence-popover-title">{{ t('nodePool.intelligenceLabel') }}</div>
+                  <div v-for="(line, index) in nodeIntelligencePopoverLines(node)" :key="`${node.id}-candidate-${index}`" class="node-intelligence-popover-line">
+                    {{ line }}
+                  </div>
+                </div>
+              </n-popover>
               <n-tag size="small">{{ delayLabel(node) }}</n-tag>
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
             </n-space>
@@ -792,32 +790,31 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
-            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
-            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
-              {{ nodeExitIpMeta(node) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
-              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
-              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
-            </div>
-            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
-              {{ nodeIntelligenceDetailLine(node) }}
-            </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
-              <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
-                {{ cleanlinessLabel(node.cleanliness) }}
-              </n-tag>
-              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
-                {{ networkTypeLabel(node.networkType) }}
-              </n-tag>
-              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                {{ exitIpStatusLabel(node.exitIpStatus) }}
-              </n-tag>
+              <n-popover trigger="hover" placement="top-start">
+                <template #trigger>
+                  <n-space :size="8" wrap class="node-intelligence-trigger">
+                    <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
+                      {{ cleanlinessLabel(node.cleanliness) }}
+                    </n-tag>
+                    <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                      {{ networkTypeLabel(node.networkType) }}
+                    </n-tag>
+                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                      {{ exitIpStatusLabel(node.exitIpStatus) }}
+                    </n-tag>
+                  </n-space>
+                </template>
+                <div class="node-intelligence-popover">
+                  <div class="node-intelligence-popover-title">{{ t('nodePool.intelligenceLabel') }}</div>
+                  <div v-for="(line, index) in nodeIntelligencePopoverLines(node)" :key="`${node.id}-standby-${index}`" class="node-intelligence-popover-line">
+                    {{ line }}
+                  </div>
+                </div>
+              </n-popover>
               <n-tag size="small">{{ delayLabel(node) }}</n-tag>
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
             </n-space>
@@ -894,32 +891,31 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
-            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
-            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
-              {{ nodeExitIpMeta(node) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
-              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
-              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
-            </div>
-            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
-              {{ nodeIntelligenceDetailLine(node) }}
-            </div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
-              <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
-                {{ cleanlinessLabel(node.cleanliness) }}
-              </n-tag>
-              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
-                {{ networkTypeLabel(node.networkType) }}
-              </n-tag>
-              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                {{ exitIpStatusLabel(node.exitIpStatus) }}
-              </n-tag>
+              <n-popover trigger="hover" placement="top-start">
+                <template #trigger>
+                  <n-space :size="8" wrap class="node-intelligence-trigger">
+                    <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
+                      {{ cleanlinessLabel(node.cleanliness) }}
+                    </n-tag>
+                    <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                      {{ networkTypeLabel(node.networkType) }}
+                    </n-tag>
+                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                      {{ exitIpStatusLabel(node.exitIpStatus) }}
+                    </n-tag>
+                  </n-space>
+                </template>
+                <div class="node-intelligence-popover">
+                  <div class="node-intelligence-popover-title">{{ t('nodePool.intelligenceLabel') }}</div>
+                  <div v-for="(line, index) in nodeIntelligencePopoverLines(node)" :key="`${node.id}-quarantine-${index}`" class="node-intelligence-popover-line">
+                    {{ line }}
+                  </div>
+                </div>
+              </n-popover>
               <n-tag size="small">{{ failRateLabel(node) }}</n-tag>
             </n-space>
             <n-space :size="8" class="node-card-actions">
@@ -1006,33 +1002,32 @@
             </div>
             <div class="node-card-meta">{{ node.address }}:{{ node.port }}</div>
             <div class="node-card-meta">{{ nodeReasonLabel(node) }}</div>
-            <div class="node-card-meta">{{ nodeExitIpHeadline(node) }}</div>
-            <div v-if="nodeExitIpMeta(node)" class="node-card-meta node-card-meta-detail" :title="nodeExitIpMeta(node)">
-              {{ nodeExitIpMeta(node) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('cleanliness', node)">
-              {{ nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence) }}
-            </div>
-            <div class="node-card-meta node-card-meta-detail" :title="nodeVerdictTitle('network', node)">
-              {{ nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence) }}
-            </div>
-            <div v-if="nodeIntelligenceDetailLine(node)" class="node-card-meta node-card-meta-detail" :title="nodeIntelligenceDetailLine(node)">
-              {{ nodeIntelligenceDetailLine(node) }}
-            </div>
             <div class="node-card-meta">{{ t('nodePool.removedAt') }}: {{ formatDateTime(node.statusUpdatedAt || node.lastEventAt || node.addedAt) || '-' }}</div>
             <n-space :size="8" wrap>
               <n-tag v-if="showSubscriptionMissingTag(node)" size="small" type="warning">
                 {{ t('nodePool.subscriptionMissingFlag') }}
               </n-tag>
-              <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
-                {{ cleanlinessLabel(node.cleanliness) }}
-              </n-tag>
-              <n-tag size="small" :type="networkTypeTagType(node.networkType)">
-                {{ networkTypeLabel(node.networkType) }}
-              </n-tag>
-              <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                {{ exitIpStatusLabel(node.exitIpStatus) }}
-              </n-tag>
+              <n-popover trigger="hover" placement="top-start">
+                <template #trigger>
+                  <n-space :size="8" wrap class="node-intelligence-trigger">
+                    <n-tag size="small" :type="cleanlinessTagType(node.cleanliness)">
+                      {{ cleanlinessLabel(node.cleanliness) }}
+                    </n-tag>
+                    <n-tag size="small" :type="networkTypeTagType(node.networkType)">
+                      {{ networkTypeLabel(node.networkType) }}
+                    </n-tag>
+                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
+                      {{ exitIpStatusLabel(node.exitIpStatus) }}
+                    </n-tag>
+                  </n-space>
+                </template>
+                <div class="node-intelligence-popover">
+                  <div class="node-intelligence-popover-title">{{ t('nodePool.intelligenceLabel') }}</div>
+                  <div v-for="(line, index) in nodeIntelligencePopoverLines(node)" :key="`${node.id}-removed-${index}`" class="node-intelligence-popover-line">
+                    {{ line }}
+                  </div>
+                </div>
+              </n-popover>
             </n-space>
             <n-space :size="8" class="node-card-actions">
               <n-button size="small" type="primary" @click="handleRestore(node.id)">
@@ -1126,6 +1121,7 @@ import {
   NList,
   NListItem,
   NPopconfirm,
+  NPopover,
   NSelect,
   NSpace,
   NSwitch,
@@ -1849,28 +1845,37 @@ function nodeVerdictTitle(kind: VerdictKind, node: NodeRecord) {
   return [detail, extra].filter(Boolean).join('\n')
 }
 
-function renderNodeIntelligence(row: NodeRecord) {
-  const exitMeta = nodeExitIpMeta(row)
-  const detailLine = nodeIntelligenceDetailLine(row)
-  const cleanlinessTitle = nodeVerdictTitle('cleanliness', row) || undefined
-  const networkTitle = nodeVerdictTitle('network', row) || undefined
+function nodeIntelligencePopoverLines(node: NodeRecord) {
+  return [
+    nodeExitIpHeadline(node),
+    nodeExitIpMeta(node),
+    nodeVerdictLine('cleanliness', node.cleanlinessReason, node.cleanlinessConfidence),
+    nodeVerdictLine('network', node.networkTypeReason, node.networkTypeConfidence),
+    nodeIntelligenceDetailLine(node)
+  ].filter(Boolean)
+}
 
-  return h('div', { class: 'node-intelligence-cell' }, [
-    h(NSpace, { size: 6, wrap: true }, {
-      default: () => [
-        h(NTag, { size: 'small', type: cleanlinessTagType(row.cleanliness) }, { default: () => cleanlinessLabel(row.cleanliness) }),
-        h(NTag, { size: 'small', type: networkTypeTagType(row.networkType) }, { default: () => networkTypeLabel(row.networkType) }),
-        row.exitIpStatus !== 'available'
-          ? h(NTag, { size: 'small', type: exitIpStatusTagType(row.exitIpStatus) }, { default: () => exitIpStatusLabel(row.exitIpStatus) })
-          : null
-      ]
-    }),
-    h('div', { class: 'node-pool-meta' }, nodeExitIpHeadline(row)),
-    exitMeta ? h('div', { class: 'node-pool-meta node-intelligence-secondary', title: exitMeta }, exitMeta) : null,
-    h('div', { class: 'node-pool-meta node-intelligence-secondary', title: cleanlinessTitle }, nodeVerdictLine('cleanliness', row.cleanlinessReason, row.cleanlinessConfidence)),
-    h('div', { class: 'node-pool-meta node-intelligence-secondary', title: networkTitle }, nodeVerdictLine('network', row.networkTypeReason, row.networkTypeConfidence)),
-    detailLine ? h('div', { class: 'node-pool-meta node-intelligence-secondary', title: detailLine }, detailLine) : null
-  ])
+function renderNodeIntelligenceTags(row: NodeRecord) {
+  return h(NSpace, { size: 6, wrap: true, class: 'node-intelligence-tag-group' }, {
+    default: () => [
+      h(NTag, { size: 'small', type: cleanlinessTagType(row.cleanliness) }, { default: () => cleanlinessLabel(row.cleanliness) }),
+      h(NTag, { size: 'small', type: networkTypeTagType(row.networkType) }, { default: () => networkTypeLabel(row.networkType) }),
+      row.exitIpStatus !== 'available'
+        ? h(NTag, { size: 'small', type: exitIpStatusTagType(row.exitIpStatus) }, { default: () => exitIpStatusLabel(row.exitIpStatus) })
+        : null
+    ]
+  })
+}
+
+function renderNodeIntelligence(row: NodeRecord) {
+  const lines = nodeIntelligencePopoverLines(row)
+  return h(NPopover, { trigger: 'hover', placement: 'top-start' }, {
+    trigger: () => h('div', { class: 'node-intelligence-cell node-intelligence-trigger' }, [renderNodeIntelligenceTags(row)]),
+    default: () => h('div', { class: 'node-intelligence-popover' }, [
+      h('div', { class: 'node-intelligence-popover-title' }, t('nodePool.intelligenceLabel')),
+      ...lines.map((line, index) => h('div', { key: `${row.id}-${index}`, class: 'node-intelligence-popover-line' }, line))
+    ])
+  })
 }
 
 function formatDateTime(value?: string) {
@@ -2821,9 +2826,34 @@ onBeforeUnmount(() => {
 }
 
 .node-intelligence-cell {
+  display: inline-flex;
+  align-items: center;
+}
+
+.node-intelligence-trigger {
+  cursor: help;
+}
+
+.node-intelligence-tag-group {
+  max-width: 100%;
+}
+
+.node-intelligence-popover {
   display: flex;
+  max-width: min(360px, 70vw);
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+}
+
+.node-intelligence-popover-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--n-text-color-3);
+}
+
+.node-intelligence-popover-line {
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .node-intelligence-secondary,
