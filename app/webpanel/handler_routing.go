@@ -215,20 +215,8 @@ func (wp *WebPanel) previewTunRoute(testReq routingTestRequest) (tunRoutePreview
 	if wp.tunManager == nil {
 		return tunRoutePreviewResult{}, fmt.Errorf("TUN manager is not configured")
 	}
-	if wp.subManager == nil {
-		return tunRoutePreviewResult{}, fmt.Errorf("subscription manager is not configured")
-	}
 
-	settings, err := wp.tunManager.SettingsSnapshot()
-	if err != nil {
-		return tunRoutePreviewResult{}, err
-	}
-	raw, err := os.ReadFile(wp.tunManager.configPath)
-	if err != nil {
-		return tunRoutePreviewResult{}, err
-	}
-	activeNodes := wp.subManager.ListNodesByStatuses(NodeStatusActive)
-	runtimeConfig, err := buildTunRuntimeConfig(raw, settings, activeNodes)
+	runtimeConfig, err := wp.previewTunRuntimeConfig()
 	if err != nil {
 		return tunRoutePreviewResult{}, err
 	}
@@ -244,6 +232,41 @@ func (wp *WebPanel) previewTunRoute(testReq routingTestRequest) (tunRoutePreview
 		User:       testReq.User,
 		InboundTag: testReq.InboundTag,
 	})
+}
+
+func (wp *WebPanel) previewTunRuntimeConfig() ([]byte, error) {
+	if wp.tunManager == nil {
+		return nil, fmt.Errorf("TUN manager is not configured")
+	}
+
+	settings, err := wp.tunManager.SettingsSnapshot()
+	if err != nil {
+		return nil, err
+	}
+
+	status := wp.tunManager.Status()
+	if status != nil && status.Running {
+		runtimeConfig, readErr := os.ReadFile(settings.RuntimeConfigPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read running TUN runtime config: %w", readErr)
+		}
+		return runtimeConfig, nil
+	}
+
+	if wp.subManager == nil {
+		return nil, fmt.Errorf("subscription manager is not configured")
+	}
+
+	raw, err := os.ReadFile(wp.tunManager.configPath)
+	if err != nil {
+		return nil, err
+	}
+	eligibleNodes, _ := wp.eligibleTransparentNodes()
+	runtimeConfig, err := buildTunRuntimeConfig(raw, settings, eligibleNodes)
+	if err != nil {
+		return nil, err
+	}
+	return runtimeConfig, nil
 }
 
 // handleBalancers handles GET/PUT /api/v1/routing/balancers/:tag.
