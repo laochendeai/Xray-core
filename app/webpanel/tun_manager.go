@@ -319,6 +319,17 @@ func (m *TunManager) Status() *TunStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.statusLocked(true)
+}
+
+func (m *TunManager) StatusWithoutEgressProbe() *TunStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.statusLocked(false)
+}
+
+func (m *TunManager) statusLocked(includeEgressProbe bool) *TunStatus {
 	settings, err := m.loadSettings()
 	if err != nil {
 		return &TunStatus{
@@ -330,7 +341,7 @@ func (m *TunManager) Status() *TunStatus {
 		}
 	}
 
-	return m.inspectLocked(settings)
+	return m.inspectLocked(settings, includeEgressProbe)
 }
 
 func (m *TunManager) Start(activeNodes []NodeRecord) *TunStatus {
@@ -348,7 +359,10 @@ func (m *TunManager) Start(activeNodes []NodeRecord) *TunStatus {
 		}
 	}
 
-	preflight := m.inspectLocked(settings)
+	preflight := m.inspectLocked(settings, true)
+	if preflight.Running {
+		return preflight
+	}
 	if preflight.PrivilegeInstallRecommended {
 		preflight.Status = "blocked"
 		preflight.Message = "Install or repair the privilege helper before enabling transparent TUN mode"
@@ -365,7 +379,7 @@ func (m *TunManager) Start(activeNodes []NodeRecord) *TunStatus {
 	}
 
 	output, execErr := m.runHelperLocked(settings, "start", true)
-	status := m.inspectLocked(settings)
+	status := m.inspectLocked(settings, true)
 	status.LastOutput = output
 	if execErr != nil {
 		status.Status = "error"
@@ -398,7 +412,7 @@ func (m *TunManager) RestoreClean() *TunStatus {
 	}
 
 	output, execErr := m.runHelperLocked(settings, "stop", true)
-	status := m.inspectLocked(settings)
+	status := m.inspectLocked(settings, true)
 	status.LastOutput = output
 	if execErr != nil {
 		status.Status = "error"
@@ -440,9 +454,9 @@ func (m *TunManager) InstallPrivilege() *TunStatus {
 	var status *TunStatus
 	switch {
 	case reloadErr == nil:
-		status = m.inspectLocked(reloadedSettings)
+		status = m.inspectLocked(reloadedSettings, true)
 	case settings != nil:
-		status = m.inspectLocked(settings)
+		status = m.inspectLocked(settings, true)
 	default:
 		status = &TunStatus{
 			Status:     "unavailable",
@@ -900,7 +914,7 @@ func (m *TunManager) readConfigMapLocked() (map[string]interface{}, error) {
 	return config, nil
 }
 
-func (m *TunManager) inspectLocked(settings *TunFeatureSettings) *TunStatus {
+func (m *TunManager) inspectLocked(settings *TunFeatureSettings, includeEgressProbe bool) *TunStatus {
 	status := &TunStatus{
 		Status:            "stopped",
 		Available:         true,
@@ -918,7 +932,9 @@ func (m *TunManager) inspectLocked(settings *TunFeatureSettings) *TunStatus {
 		ConfigPath:        m.configPath,
 		XrayBinary:        settings.BinaryPath,
 	}
-	defer m.populateEgressObservationsLocked(settings, status)
+	if includeEgressProbe {
+		defer m.populateEgressObservationsLocked(settings, status)
+	}
 
 	if normalizeTunRouteMode(settings.RouteMode) == TunRouteModeAutoTested {
 		status.Diagnostics = append(status.Diagnostics, "Auto-tested split routing will probe base direct rules before enabling transparent mode; the first start or stale cache refresh can take longer.")

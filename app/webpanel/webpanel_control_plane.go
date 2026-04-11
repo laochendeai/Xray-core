@@ -33,6 +33,18 @@ func (wp *WebPanel) tunStatusSnapshot() *TunStatus {
 	return wp.appendTunStableDiagnostics(status, false)
 }
 
+func (wp *WebPanel) tunStatusSnapshotWithoutEgressProbe() *TunStatus {
+	if wp.tunManager == nil {
+		return &TunStatus{
+			Status:    "unavailable",
+			Available: false,
+			Message:   "TUN manager is not configured",
+		}
+	}
+	status := wp.decorateTunStatus(wp.tunManager.StatusWithoutEgressProbe())
+	return wp.appendTunStableDiagnostics(status, false)
+}
+
 func (wp *WebPanel) startTransparentMode() *TunStatus {
 	if wp.tunManager == nil {
 		return &TunStatus{
@@ -63,6 +75,9 @@ func (wp *WebPanel) startTransparentMode() *TunStatus {
 		if wp.controlPlane != nil {
 			wp.controlPlane.Transition(MachineStateClean, MachineReasonTunStartFailed, EventActorOperator, status.Message)
 		}
+		return wp.appendTunStableDiagnostics(wp.decorateTunStatus(status), false)
+	}
+	if status.Status == "blocked" {
 		return wp.appendTunStableDiagnostics(wp.decorateTunStatus(status), false)
 	}
 

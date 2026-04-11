@@ -61,6 +61,8 @@ The upstream [README](https://github.com/XTLS/Xray-core#readme) is open, so feel
 
 [![Happ](https://github.com/user-attachments/assets/14055dab-e8bb-48bd-89e8-962709e4098e)](https://happ.su)
 
+[**Support this fork on 爱发电**](https://ifdian.net/a/abc678)
+
 [**Sponsor Xray-core**](https://github.com/XTLS/Xray-core/issues/3668)
 
 ## Upstream Donation & NFTs
