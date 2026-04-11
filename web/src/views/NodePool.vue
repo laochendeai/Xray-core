@@ -607,9 +607,6 @@
                     <n-tag size="small" :type="networkTypeTagType(node.networkType)">
                       {{ networkTypeLabel(node.networkType) }}
                     </n-tag>
-                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                      {{ exitIpStatusLabel(node.exitIpStatus) }}
-                    </n-tag>
                   </n-space>
                 </template>
                 <div class="node-intelligence-popover">
@@ -701,9 +698,6 @@
                     </n-tag>
                     <n-tag size="small" :type="networkTypeTagType(node.networkType)">
                       {{ networkTypeLabel(node.networkType) }}
-                    </n-tag>
-                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                      {{ exitIpStatusLabel(node.exitIpStatus) }}
                     </n-tag>
                   </n-space>
                 </template>
@@ -803,9 +797,6 @@
                     <n-tag size="small" :type="networkTypeTagType(node.networkType)">
                       {{ networkTypeLabel(node.networkType) }}
                     </n-tag>
-                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                      {{ exitIpStatusLabel(node.exitIpStatus) }}
-                    </n-tag>
                   </n-space>
                 </template>
                 <div class="node-intelligence-popover">
@@ -903,9 +894,6 @@
                     </n-tag>
                     <n-tag size="small" :type="networkTypeTagType(node.networkType)">
                       {{ networkTypeLabel(node.networkType) }}
-                    </n-tag>
-                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                      {{ exitIpStatusLabel(node.exitIpStatus) }}
                     </n-tag>
                   </n-space>
                 </template>
@@ -1015,9 +1003,6 @@
                     </n-tag>
                     <n-tag size="small" :type="networkTypeTagType(node.networkType)">
                       {{ networkTypeLabel(node.networkType) }}
-                    </n-tag>
-                    <n-tag v-if="node.exitIpStatus !== 'available'" size="small" :type="exitIpStatusTagType(node.exitIpStatus)">
-                      {{ exitIpStatusLabel(node.exitIpStatus) }}
                     </n-tag>
                   </n-space>
                 </template>
@@ -1747,17 +1732,6 @@ function networkTypeTagType(networkType: NodeNetworkType) {
   }
 }
 
-function exitIpStatusTagType(status: NodeExitIPStatus) {
-  switch (status) {
-    case 'error':
-      return 'error'
-    case 'unknown':
-      return 'warning'
-    default:
-      return 'info'
-  }
-}
-
 function failRateLabel(node: NodeRecord) {
   if (!node.totalPings) return t('nodePool.failRateUnknown')
   return `${((node.failedPings / node.totalPings) * 100).toFixed(1)}%`
@@ -1859,10 +1833,7 @@ function renderNodeIntelligenceTags(row: NodeRecord) {
   return h(NSpace, { size: 6, wrap: true, class: 'node-intelligence-tag-group' }, {
     default: () => [
       h(NTag, { size: 'small', type: cleanlinessTagType(row.cleanliness) }, { default: () => cleanlinessLabel(row.cleanliness) }),
-      h(NTag, { size: 'small', type: networkTypeTagType(row.networkType) }, { default: () => networkTypeLabel(row.networkType) }),
-      row.exitIpStatus !== 'available'
-        ? h(NTag, { size: 'small', type: exitIpStatusTagType(row.exitIpStatus) }, { default: () => exitIpStatusLabel(row.exitIpStatus) })
-        : null
+      h(NTag, { size: 'small', type: networkTypeTagType(row.networkType) }, { default: () => networkTypeLabel(row.networkType) })
     ]
   })
 }
@@ -2223,8 +2194,7 @@ function bindingResolvedDomains(binding: DestinationBindingDraft) {
 
 function bindingNodeOptionLabel(node: NodeRecord) {
   const title = node.remark || `${node.address}:${node.port}`
-  const exitIp = node.exitIpStatus === 'available' && node.exitIp ? node.exitIp : exitIpStatusLabel(node.exitIpStatus || 'unknown')
-  return [title, exitIp, cleanlinessLabel(node.cleanliness), networkTypeLabel(node.networkType)].filter(Boolean).join(' · ')
+  return [title, cleanlinessLabel(node.cleanliness), networkTypeLabel(node.networkType)].filter(Boolean).join(' · ')
 }
 
 function bindingNodeOptions(binding: DestinationBindingDraft) {
