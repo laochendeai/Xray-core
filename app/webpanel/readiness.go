@@ -377,7 +377,7 @@ func (wp *WebPanel) readinessTunCheck() ReadinessCheck {
 		}
 	}
 
-	status := wp.tunStatusSnapshot()
+	status := wp.tunStatusSnapshotWithoutEgressProbe()
 	facts := map[string]interface{}{
 		"status":                      status.Status,
 		"running":                     status.Running,

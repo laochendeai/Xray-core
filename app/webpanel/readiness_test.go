@@ -141,6 +141,37 @@ func TestWebPanelReadinessSnapshotSummarizesConfiguredState(t *testing.T) {
 	}
 }
 
+func TestWebPanelReadinessSnapshotSkipsDirectEgressProbe(t *testing.T) {
+	t.Parallel()
+
+	wp, _ := newTestControlPlaneWebPanel(t)
+	defer wp.subManager.Stop()
+
+	called := false
+	wp.tunManager.directEgressProber = func(*TunFeatureSettings) tunPublicEgressProbeResult {
+		called = true
+		return tunPublicEgressProbeResult{Error: "readiness should not trigger direct egress probe"}
+	}
+	wp.releaseChecker = cachedReleaseChecker(UpdateStatusResponse{
+		CurrentVersion: "1.0.0",
+		Source:         "test",
+		Status:         "ok",
+	})
+
+	response := wp.readinessSnapshot(context.Background())
+	if called {
+		t.Fatal("expected readiness snapshot to skip direct egress probing")
+	}
+
+	tunCheck, ok := readinessCheckByKey(response.Checks, "tun")
+	if !ok {
+		t.Fatal("expected tun readiness check")
+	}
+	if _, ok := tunCheck.Facts["status"].(string); !ok {
+		t.Fatalf("expected tun readiness facts to include status, got %#v", tunCheck.Facts)
+	}
+}
+
 func cachedReleaseChecker(status UpdateStatusResponse) *releaseChecker {
 	now := time.Date(2026, 4, 4, 4, 0, 0, 0, time.UTC)
 	return &releaseChecker{
