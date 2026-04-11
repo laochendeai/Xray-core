@@ -349,6 +349,9 @@ func (m *TunManager) Start(activeNodes []NodeRecord) *TunStatus {
 	}
 
 	preflight := m.inspectLocked(settings)
+	if preflight.Running {
+		return preflight
+	}
 	if preflight.PrivilegeInstallRecommended {
 		preflight.Status = "blocked"
 		preflight.Message = "Install or repair the privilege helper before enabling transparent TUN mode"

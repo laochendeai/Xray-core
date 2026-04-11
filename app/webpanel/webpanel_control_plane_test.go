@@ -175,6 +175,92 @@ func TestWebPanelStartTransparentModeBlocksWhenEligiblePoolBelowMinimumEvenIfAct
 	}
 }
 
+func TestWebPanelStartTransparentModeTreatsAlreadyRunningTunAsSuccess(t *testing.T) {
+	t.Parallel()
+
+	wp, paths := newTestControlPlaneWebPanel(t)
+	defer wp.subManager.Stop()
+
+	if err := os.WriteFile(paths.helperStatePath, []byte("running\n"), 0o644); err != nil {
+		t.Fatalf("write helper state: %v", err)
+	}
+
+	now := time.Now()
+	wp.subManager.mu.Lock()
+	wp.subManager.state.ValidationConfig.MinActiveNodes = 1
+	wp.subManager.state.Nodes = []NodeRecord{
+		testTransparentNodeRecord(t, "node-good", "vmess", &now, 120, 0),
+	}
+	wp.subManager.mu.Unlock()
+
+	status := wp.startTransparentMode()
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+	if status.Status != "running" {
+		t.Fatalf("expected running status, got %q", status.Status)
+	}
+	if !status.Running {
+		t.Fatal("expected running=true when transparent TUN is already active")
+	}
+	if status.Message != "Transparent TUN mode is enabled" {
+		t.Fatalf("unexpected message: %q", status.Message)
+	}
+
+	snapshot := wp.controlPlane.Snapshot()
+	if snapshot.MachineState != MachineStateProxied {
+		t.Fatalf("expected proxied state after start request, got %q", snapshot.MachineState)
+	}
+	if snapshot.LastStateReason != MachineReasonOperatorEnabled {
+		t.Fatalf("expected operator enabled reason, got %q", snapshot.LastStateReason)
+	}
+
+	if _, err := os.Stat(paths.runtimeConfigPath); !os.IsNotExist(err) {
+		t.Fatalf("did not expect runtime config rewrite when TUN is already running, got err=%v", err)
+	}
+}
+
+func TestWebPanelStartTransparentModeKeepsMachineCleanWhenPrivilegeRepairIsRequired(t *testing.T) {
+	t.Parallel()
+
+	wp, paths := newTestControlPlaneWebPanel(t)
+	defer wp.subManager.Stop()
+
+	now := time.Now()
+	wp.subManager.mu.Lock()
+	wp.subManager.state.ValidationConfig.MinActiveNodes = 1
+	wp.subManager.state.Nodes = []NodeRecord{
+		testTransparentNodeRecord(t, "node-good", "vmess", &now, 120, 0),
+	}
+	wp.subManager.mu.Unlock()
+
+	status := wp.startTransparentMode()
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+	if status.Status != "blocked" {
+		t.Fatalf("expected blocked status, got %q", status.Status)
+	}
+	if !strings.Contains(status.Message, "Install or repair") {
+		t.Fatalf("unexpected blocked message: %q", status.Message)
+	}
+	if status.Running {
+		t.Fatal("did not expect running=true when privilege repair is still required")
+	}
+
+	snapshot := wp.controlPlane.Snapshot()
+	if snapshot.MachineState != MachineStateClean {
+		t.Fatalf("expected machine to remain clean, got %q", snapshot.MachineState)
+	}
+	if snapshot.LastStateReason != MachineReasonStartupDefaultClean {
+		t.Fatalf("expected startup clean reason to remain, got %q", snapshot.LastStateReason)
+	}
+
+	if _, err := os.Stat(paths.runtimeConfigPath); !os.IsNotExist(err) {
+		t.Fatalf("did not expect runtime config write when privilege repair blocks startup, got err=%v", err)
+	}
+}
+
 func TestWebPanelEligibleTransparentNodesExcludesUnstableActiveNodes(t *testing.T) {
 	t.Parallel()
 

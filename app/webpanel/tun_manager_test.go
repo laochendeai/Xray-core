@@ -1762,6 +1762,32 @@ func TestTunManagerStartBlocksWhenPrivilegeArtifactsAreStale(t *testing.T) {
 	}
 }
 
+func TestTunManagerStartReturnsRunningWhenTunIsAlreadyActive(t *testing.T) {
+	tunManager, paths := newStatusTestTunManager(t)
+
+	if err := os.WriteFile(paths.helperStatePath, []byte("running\n"), 0o644); err != nil {
+		t.Fatalf("write helper state: %v", err)
+	}
+
+	status := tunManager.Start(nil)
+	if status == nil {
+		t.Fatal("expected tun status")
+	}
+	if status.Status != "running" {
+		t.Fatalf("expected running status, got %q", status.Status)
+	}
+	if !status.Running {
+		t.Fatal("expected running=true when helper already reports an active TUN")
+	}
+	if status.Message != "Transparent TUN mode is enabled" {
+		t.Fatalf("unexpected message: %q", status.Message)
+	}
+
+	if _, err := os.Stat(filepath.Join(paths.stateDir, "config.json")); !os.IsNotExist(err) {
+		t.Fatalf("did not expect runtime config regeneration when TUN is already running, got err=%v", err)
+	}
+}
+
 func TestTunManagerStatusReportsSeparatedLiveAndProxyEgressWhenTunStopped(t *testing.T) {
 	tunManager, paths := newStatusTestTunManager(t)
 

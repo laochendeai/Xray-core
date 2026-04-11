@@ -65,6 +65,9 @@ func (wp *WebPanel) startTransparentMode() *TunStatus {
 		}
 		return wp.appendTunStableDiagnostics(wp.decorateTunStatus(status), false)
 	}
+	if status.Status == "blocked" {
+		return wp.appendTunStableDiagnostics(wp.decorateTunStatus(status), false)
+	}
 
 	if wp.controlPlane != nil {
 		wp.controlPlane.Transition(MachineStateProxied, MachineReasonOperatorEnabled, EventActorOperator, "transparent mode enabled from the node pool workspace")
