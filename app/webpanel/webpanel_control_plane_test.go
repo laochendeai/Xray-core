@@ -226,6 +226,33 @@ func TestWebPanelStartTransparentModeKeepsMachineCleanWhenPrivilegeRepairIsRequi
 	wp, paths := newTestControlPlaneWebPanel(t)
 	defer wp.subManager.Stop()
 
+	staleBinaryPath := filepath.Join(t.TempDir(), "stale-xray")
+	if err := os.WriteFile(staleBinaryPath, []byte("stale-xray-binary"), 0o755); err != nil {
+		t.Fatalf("write stale binary: %v", err)
+	}
+
+	rawConfig, err := os.ReadFile(wp.tunManager.configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(rawConfig, &config); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+
+	webpanelConfig, _ := config["webpanel"].(map[string]any)
+	tunConfig, _ := webpanelConfig["tun"].(map[string]any)
+	tunConfig["binaryPath"] = staleBinaryPath
+
+	rawConfig, err = json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.WriteFile(wp.tunManager.configPath, rawConfig, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
 	now := time.Now()
 	wp.subManager.mu.Lock()
 	wp.subManager.state.ValidationConfig.MinActiveNodes = 1

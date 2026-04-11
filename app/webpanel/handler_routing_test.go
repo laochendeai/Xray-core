@@ -1,37 +1,43 @@
 package webpanel
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-func writePreviewTunTestConfig(t *testing.T, helperPath string, runtimeConfigPath string, destinationBindings string) string {
+func writePreviewTunTestConfig(t *testing.T, helperPath string, runtimeConfigPath string, destinationBindings []TunDestinationBinding) string {
 	t.Helper()
 
 	configPath := filepath.Join(t.TempDir(), "config.json")
-	config := `{
-  "outbounds": [
-    { "tag": "direct", "protocol": "freedom" }
-  ],
-  "routing": {
-    "rules": []
-  },
-  "webpanel": {
-    "tun": {
-      "helperPath": "` + helperPath + `",
-      "runtimeConfigPath": "` + runtimeConfigPath + `",
-      "interfaceName": "xray0",
-      "mtu": 1500,
-      "useSudo": false,
-      "protectDomains": ["full:localhost"],
-      "protectCidrs": ["127.0.0.0/8"],
-      "destinationBindings": ` + destinationBindings + `
-    }
-  }
-}`
-	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+	config := map[string]any{
+		"outbounds": []map[string]any{
+			{"tag": "direct", "protocol": "freedom"},
+		},
+		"routing": map[string]any{
+			"rules": []any{},
+		},
+		"webpanel": map[string]any{
+			"tun": map[string]any{
+				"helperPath":          helperPath,
+				"runtimeConfigPath":   runtimeConfigPath,
+				"interfaceName":       "xray0",
+				"mtu":                 1500,
+				"useSudo":             false,
+				"protectDomains":      []string{"full:localhost"},
+				"protectCidrs":        []string{"127.0.0.0/8"},
+				"destinationBindings": destinationBindings,
+			},
+		},
+	}
+
+	raw, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.WriteFile(configPath, raw, 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	return configPath
@@ -81,9 +87,9 @@ func TestWebPanelPreviewTunRouteUsesRunningRuntimeConfig(t *testing.T) {
 		t.Fatalf("write runtime config: %v", err)
 	}
 
-	configPath := writePreviewTunTestConfig(t, helperPath, runtimeConfigPath, `[
-        {"preset":"openai","nodeId":"different-node"}
-      ]`)
+	configPath := writePreviewTunTestConfig(t, helperPath, runtimeConfigPath, []TunDestinationBinding{
+		{Preset: "openai", NodeID: "different-node"},
+	})
 	tunManager, err := NewTunManager(configPath)
 	if err != nil {
 		t.Fatalf("new tun manager: %v", err)
@@ -111,9 +117,9 @@ func TestWebPanelPreviewTunRouteUsesEligibleNodesWhenStopped(t *testing.T) {
 
 	helperPath := writePreviewTunHelper(t, "stopped")
 	runtimeConfigPath := filepath.Join(t.TempDir(), "runtime.json")
-	configPath := writePreviewTunTestConfig(t, helperPath, runtimeConfigPath, `[
-        {"preset":"openai","nodeId":"target-node"}
-      ]`)
+	configPath := writePreviewTunTestConfig(t, helperPath, runtimeConfigPath, []TunDestinationBinding{
+		{Preset: "openai", NodeID: "target-node"},
+	})
 	tunManager, err := NewTunManager(configPath)
 	if err != nil {
 		t.Fatalf("new tun manager: %v", err)
