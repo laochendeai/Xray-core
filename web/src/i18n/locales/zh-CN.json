@@ -585,7 +585,7 @@
     },
     "destinationBindings": "目标站点绑定",
     "destinationBindingsTitle": "按目标站点固定走指定节点",
-    "destinationBindingsDesc": "这里可以把 OpenAI、ChatGPT 或自定义域名固定到某个活跃节点。选择器会直接复用节点池里已有的出口 IP、干净度和网络类型信息，方便你挑已知更稳的节点。",
+    "destinationBindingsDesc": "这里可以把 OpenAI、ChatGPT、Claude、Gemini、Copilot、OpenRouter 等目标固定到某个活跃节点。节点列表会优先把干净度更高、家宽倾向更强、失败率更低的活跃节点排在前面，你也可以手工指定任意活跃节点。",
     "destinationBindingsEmpty": "还没有配置任何目标站点绑定。",
     "destinationBindingsNoActiveNodes": "当前没有可选的活跃节点，先让节点进入活跃池后再配置绑定。",
     "destinationBindingAdd": "新增绑定",
@@ -603,6 +603,14 @@
     "destinationBindingPresetOptions": {
       "openai": "OpenAI 预设",
       "chatgpt": "ChatGPT 预设",
+      "claude": "Claude / Anthropic",
+      "gemini": "Gemini / Google AI",
+      "github_copilot": "GitHub Copilot",
+      "openrouter": "OpenRouter",
+      "cursor": "Cursor",
+      "qwen": "Qwen / 通义千问",
+      "perplexity": "Perplexity",
+      "deepseek": "DeepSeek",
       "custom": "自定义域名"
     },
     "remoteDns": "远端 DNS 列表",

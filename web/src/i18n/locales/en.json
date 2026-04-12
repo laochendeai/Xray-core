@@ -585,7 +585,7 @@
     },
     "destinationBindings": "Destination Bindings",
     "destinationBindingsTitle": "Pin important destinations to a chosen node",
-    "destinationBindingsDesc": "Bind OpenAI, ChatGPT, or custom domains to a specific active node. The picker reuses the existing exit-IP, cleanliness, and network-type hints from Node Pool so you can choose a known-good node faster.",
+    "destinationBindingsDesc": "Bind OpenAI, ChatGPT, Claude, Gemini, Copilot, OpenRouter, and other important destinations to a specific active node. The picker puts cleaner, more residential-looking, and more stable active nodes first, while still letting you choose any active node manually.",
     "destinationBindingsEmpty": "No destination bindings are configured yet.",
     "destinationBindingsNoActiveNodes": "There are no active nodes to bind right now. Promote or validate nodes into the active pool first.",
     "destinationBindingAdd": "Add Binding",
@@ -603,6 +603,14 @@
     "destinationBindingPresetOptions": {
       "openai": "OpenAI Preset",
       "chatgpt": "ChatGPT Preset",
+      "claude": "Claude / Anthropic",
+      "gemini": "Gemini / Google AI",
+      "github_copilot": "GitHub Copilot",
+      "openrouter": "OpenRouter",
+      "cursor": "Cursor",
+      "qwen": "Qwen",
+      "perplexity": "Perplexity",
+      "deepseek": "DeepSeek",
       "custom": "Custom Domains"
     },
     "remoteDns": "Remote DNS List",
