@@ -757,6 +757,94 @@ func TestTunManagerUpdateEditableSettingsPersistsDestinationBindings(t *testing.
 	}
 }
 
+func TestTunDestinationBindingPresetNormalizationAndDomains(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		raw      string
+		expected TunDestinationBindingPreset
+		domain   string
+	}{
+		{
+			name:     "claude",
+			raw:      " Claude ",
+			expected: TunDestinationBindingPresetClaude,
+			domain:   "domain:claude.ai",
+		},
+		{
+			name:     "gemini",
+			raw:      "GEMINI",
+			expected: TunDestinationBindingPresetGemini,
+			domain:   "full:generativelanguage.googleapis.com",
+		},
+		{
+			name:     "github_copilot",
+			raw:      "github_copilot",
+			expected: TunDestinationBindingPresetGitHubCopilot,
+			domain:   "full:copilot.github.com",
+		},
+		{
+			name:     "openrouter",
+			raw:      "openrouter",
+			expected: TunDestinationBindingPresetOpenRouter,
+			domain:   "domain:openrouter.ai",
+		},
+		{
+			name:     "cursor",
+			raw:      "cursor",
+			expected: TunDestinationBindingPresetCursor,
+			domain:   "domain:cursor.com",
+		},
+		{
+			name:     "qwen",
+			raw:      "qwen",
+			expected: TunDestinationBindingPresetQwen,
+			domain:   "full:dashscope.aliyuncs.com",
+		},
+		{
+			name:     "perplexity",
+			raw:      "perplexity",
+			expected: TunDestinationBindingPresetPerplexity,
+			domain:   "domain:perplexity.ai",
+		},
+		{
+			name:     "deepseek",
+			raw:      "deepseek",
+			expected: TunDestinationBindingPresetDeepSeek,
+			domain:   "domain:deepseek.com",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := normalizeTunDestinationBindingPreset(tc.raw); got != tc.expected {
+				t.Fatalf("expected preset %q, got %q", tc.expected, got)
+			}
+
+			domains := tunDestinationBindingDomains(TunDestinationBinding{
+				Preset: string(tc.expected),
+				NodeID: "node-1",
+			})
+			if !containsString(domains, tc.domain) {
+				t.Fatalf("expected %q in %v", tc.domain, domains)
+			}
+		})
+	}
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTunManagerUpdateEditableSettingsPersistsAggregationScaffolding(t *testing.T) {
 	t.Parallel()
 

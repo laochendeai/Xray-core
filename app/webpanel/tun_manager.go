@@ -77,9 +77,17 @@ const (
 )
 
 const (
-	TunDestinationBindingPresetOpenAI  TunDestinationBindingPreset = "openai"
-	TunDestinationBindingPresetChatGPT TunDestinationBindingPreset = "chatgpt"
-	TunDestinationBindingPresetCustom  TunDestinationBindingPreset = "custom"
+	TunDestinationBindingPresetOpenAI        TunDestinationBindingPreset = "openai"
+	TunDestinationBindingPresetChatGPT       TunDestinationBindingPreset = "chatgpt"
+	TunDestinationBindingPresetClaude        TunDestinationBindingPreset = "claude"
+	TunDestinationBindingPresetGemini        TunDestinationBindingPreset = "gemini"
+	TunDestinationBindingPresetGitHubCopilot TunDestinationBindingPreset = "github_copilot"
+	TunDestinationBindingPresetOpenRouter    TunDestinationBindingPreset = "openrouter"
+	TunDestinationBindingPresetCursor        TunDestinationBindingPreset = "cursor"
+	TunDestinationBindingPresetQwen          TunDestinationBindingPreset = "qwen"
+	TunDestinationBindingPresetPerplexity    TunDestinationBindingPreset = "perplexity"
+	TunDestinationBindingPresetDeepSeek      TunDestinationBindingPreset = "deepseek"
+	TunDestinationBindingPresetCustom        TunDestinationBindingPreset = "custom"
 )
 
 const (
@@ -134,6 +142,37 @@ var tunDestinationBindingPresetDomains = map[TunDestinationBindingPreset][]strin
 		"domain:chat.openai.com",
 		"domain:oaistatic.com",
 		"domain:oaiusercontent.com",
+	},
+	TunDestinationBindingPresetClaude: {
+		"domain:claude.ai",
+		"domain:anthropic.com",
+	},
+	TunDestinationBindingPresetGemini: {
+		"domain:gemini.google.com",
+		"domain:ai.google.dev",
+		"domain:aistudio.google.com",
+		"full:generativelanguage.googleapis.com",
+	},
+	TunDestinationBindingPresetGitHubCopilot: {
+		"full:github.com",
+		"full:api.github.com",
+		"full:copilot.github.com",
+	},
+	TunDestinationBindingPresetOpenRouter: {
+		"domain:openrouter.ai",
+	},
+	TunDestinationBindingPresetCursor: {
+		"domain:cursor.com",
+	},
+	TunDestinationBindingPresetQwen: {
+		"domain:qwen.ai",
+		"full:dashscope.aliyuncs.com",
+	},
+	TunDestinationBindingPresetPerplexity: {
+		"domain:perplexity.ai",
+	},
+	TunDestinationBindingPresetDeepSeek: {
+		"domain:deepseek.com",
 	},
 }
 
@@ -1901,6 +1940,22 @@ func normalizeTunDestinationBindingPreset(value string) TunDestinationBindingPre
 		return TunDestinationBindingPresetOpenAI
 	case TunDestinationBindingPresetChatGPT:
 		return TunDestinationBindingPresetChatGPT
+	case TunDestinationBindingPresetClaude:
+		return TunDestinationBindingPresetClaude
+	case TunDestinationBindingPresetGemini:
+		return TunDestinationBindingPresetGemini
+	case TunDestinationBindingPresetGitHubCopilot:
+		return TunDestinationBindingPresetGitHubCopilot
+	case TunDestinationBindingPresetOpenRouter:
+		return TunDestinationBindingPresetOpenRouter
+	case TunDestinationBindingPresetCursor:
+		return TunDestinationBindingPresetCursor
+	case TunDestinationBindingPresetQwen:
+		return TunDestinationBindingPresetQwen
+	case TunDestinationBindingPresetPerplexity:
+		return TunDestinationBindingPresetPerplexity
+	case TunDestinationBindingPresetDeepSeek:
+		return TunDestinationBindingPresetDeepSeek
 	default:
 		return TunDestinationBindingPresetCustom
 	}
