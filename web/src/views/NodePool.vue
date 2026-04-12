@@ -573,7 +573,18 @@
     <section class="section-block">
       <n-space justify="space-between" align="center" wrap>
         <h3>{{ t('nodePool.status.active') }} ({{ activeNodes.length }})</h3>
-        <n-select v-model:value="activeSortMode" :options="poolSortOptions" class="pool-sort-select" />
+        <n-space align="center" :size="8" wrap>
+          <n-button
+            v-if="activeNodes.length"
+            size="small"
+            secondary
+            :disabled="!activeExportableNodes.length"
+            @click="handleExportActiveNodes"
+          >
+            {{ t('nodePool.exportActivePool') }}
+          </n-button>
+          <n-select v-model:value="activeSortMode" :options="poolSortOptions" class="pool-sort-select" />
+        </n-space>
       </n-space>
       <template v-if="activeNodes.length">
         <n-data-table
@@ -1437,6 +1448,9 @@ const summary = computed<NodePoolSummary>(() => dashboard.value.summary)
 const recentEvents = computed<NodeEvent[]>(() => dashboard.value.recentEvents || [])
 const intelligenceSummary = computed(() => summarizeNodeIntelligence(nodes.value))
 const activeNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'active'), activeSortMode.value))
+const activeExportableNodes = computed(() =>
+  activeNodes.value.filter((node) => typeof node.uri === 'string' && node.uri.trim().length > 0)
+)
 const stagingNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'staging'), stagingSortMode.value))
 const quarantineNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'quarantine'), quarantineSortMode.value))
 const candidateNodes = computed(() => sortPoolNodes(nodes.value.filter((node) => node.status === 'candidate'), candidateSortMode.value))
@@ -2307,6 +2321,47 @@ async function refreshAll() {
   } finally {
     loading.value = false
   }
+}
+
+function createExportTimestamp() {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    '-',
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds())
+  ].join('')
+}
+
+function downloadTextFile(content: string, filename: string) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.click()
+  window.URL.revokeObjectURL(url)
+}
+
+function handleExportActiveNodes() {
+  const links = activeExportableNodes.value
+    .map((node) => node.uri.trim())
+    .filter((uri) => uri.length > 0)
+
+  if (!links.length) {
+    message.warning(t('nodePool.exportActivePoolEmpty'))
+    return
+  }
+
+  downloadTextFile(
+    `${links.join('\n')}\n`,
+    `xray-active-pool-${createExportTimestamp()}.txt`
+  )
+  message.success(t('nodePool.exportActivePoolSuccess', { count: links.length }))
 }
 
 async function handleEnableTransparent() {
