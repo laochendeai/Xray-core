@@ -63,6 +63,8 @@ backups/
 control_plane_state.json
 node_pool_state.json
 dev-config.current-nodes.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
 
 # System files
 Thumbs.db
