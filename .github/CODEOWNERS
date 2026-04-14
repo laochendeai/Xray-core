@@ -1,0 +1,18 @@
+# Default owner for repository changes
+* @laochendeai
+
+# Repository governance and workflow surfaces
+/CLAUDE.md @laochendeai
+/CONTRIBUTING.md @laochendeai
+/README.md @laochendeai
+/.github/CODEOWNERS @laochendeai
+/.github/ISSUE_TEMPLATE/ @laochendeai
+/.github/pull_request_template.md @laochendeai
+/.github/workflows/ci.yml @laochendeai
+/.github/workflows/release*.yml @laochendeai
+/.github/workflows/docker.yml @laochendeai
+/.githooks/ @laochendeai
+/scripts/check.sh @laochendeai
+/REAL_MACHINE_VERIFICATION.md @laochendeai
+/SECURITY.md @laochendeai
+/CODE_OF_CONDUCT.md @laochendeai
