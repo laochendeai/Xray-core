@@ -590,7 +590,15 @@
     "destinationBindingsNoActiveNodes": "There are no active nodes to bind right now. Promote or validate nodes into the active pool first.",
     "destinationBindingAdd": "Add Binding",
     "destinationBindingPreset": "Destination Type",
-    "destinationBindingNode": "Target Node",
+    "destinationBindingSelectionMode": "Selection Mode",
+    "destinationBindingSelectionModeOptions": {
+      "primary_only": "Primary only",
+      "failover_ordered": "Ordered failover",
+      "failover_fastest": "Fastest failover"
+    },
+    "destinationBindingNode": "Primary Node",
+    "destinationBindingFallbackNodes": "Fallback Nodes",
+    "destinationBindingFallbackNodesPlaceholder": "Choose fallback nodes in priority order",
     "destinationBindingDomains": "Custom Domains",
     "destinationBindingDomainsPlaceholder": "One domain rule per line, for example:\ndomain:example.com\nfull:api.example.com\n*.service.example",
     "destinationBindingResolvedDomains": "Applied domains: {domains}",
@@ -651,7 +659,7 @@
       "avg_delay_desc": "Avg delay high to low"
     },
     "poolSortOptions": {
-      "quality": "Default Quality Order",
+      "cleanliness_desc": "Trusted / Clean First",
       "last_checked_desc": "Newest probe first",
       "last_checked_asc": "Oldest probe first",
       "fail_rate_asc": "Fail rate low to high",
@@ -681,6 +689,7 @@
     "networkType": {
       "unknown": "Network Unknown",
       "residential_likely": "Residential Likely",
+      "isp_likely": "ISP Likely",
       "datacenter_likely": "Datacenter Likely"
     },
     "confidence": {
@@ -698,7 +707,8 @@
       "exit_ip_unavailable": "No usable exit IP is available",
       "lookup_failed": "Exit-IP intelligence lookup failed",
       "hosting_keyword_match": "Matched a hosting or cloud-provider signal",
-      "residential_keyword_match": "Matched an access-ISP or residential signal",
+      "isp_keyword_match": "Matched an ISP or carrier-network signal",
+      "residential_keyword_match": "Matched a residential broadband signal",
       "probe_failure_rate_high": "Probe failure rate is too high",
       "residential_stable_exit": "Residential-like exit with stable probe history",
       "datacenter_exit_network": "Exit looks more like a datacenter network",

@@ -16,6 +16,7 @@ type NodeIntelligenceConfidence string
 const (
 	NodeNetworkTypeUnknown            NodeNetworkType            = "unknown"
 	NodeNetworkTypeResidentialLikely  NodeNetworkType            = "residential_likely"
+	NodeNetworkTypeISPLikely          NodeNetworkType            = "isp_likely"
 	NodeNetworkTypeDatacenterLikely   NodeNetworkType            = "datacenter_likely"
 	NodeIntelligenceConfidenceUnknown NodeIntelligenceConfidence = "unknown"
 	NodeIntelligenceConfidenceLow     NodeIntelligenceConfidence = "low"
@@ -27,6 +28,7 @@ const (
 	nodeIntelligenceReasonExitIPUnavailable     = "exit_ip_unavailable"
 	nodeIntelligenceReasonLookupFailed          = "lookup_failed"
 	nodeIntelligenceReasonHostingKeywordMatch   = "hosting_keyword_match"
+	nodeIntelligenceReasonISPKeywordMatch       = "isp_keyword_match"
 	nodeIntelligenceReasonResidentialKeyword    = "residential_keyword_match"
 	nodeIntelligenceReasonProbeFailureRateHigh  = "probe_failure_rate_high"
 	nodeIntelligenceReasonResidentialStableExit = "residential_stable_exit"
@@ -69,12 +71,52 @@ var hostingProviderKeywords = []string{
 	"server", "datacenter", "compute",
 }
 
-var residentialISPKeywords = []string{
+var residentialProviderKeywords = []string{
+	"xfinity", "comcast", "spectrum", "charter", "verizon fios", "centurylink",
+	"cox", "rogers", "shaw", "telus", "virgin media",
+}
+
+var ispProviderKeywords = []string{
 	"telecom", "communications", "broadband", "wireless", "mobile", "fiber", "fibre",
-	"cable", "internet service", "internet services", "isp", "xfinity", "comcast",
-	"spectrum", "charter", "verizon", "at&t", "att ", "centurylink", "cox",
-	"rogers", "shaw", "telus", "telstra", "telefonica", "vodafone", "orange",
-	"china telecom", "china unicom", "china mobile", "bt", "virgin media",
+	"cable", "internet service", "internet services", "isp", "verizon", "at&t", "att ",
+	"telefonica", "vodafone", "orange", "china telecom", "china unicom", "china mobile",
+	"bt",
+}
+
+func hasWholeWord(corpus string, word string) bool {
+	for _, token := range strings.FieldsFunc(corpus, func(r rune) bool {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return false
+		case r >= '0' && r <= '9':
+			return false
+		default:
+			return true
+		}
+	}) {
+		if token == word {
+			return true
+		}
+	}
+	return false
+}
+
+func firstMatchingKeyword(corpus string, keywords []string) string {
+	if strings.TrimSpace(corpus) == "" {
+		return ""
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(keyword, " ") {
+			if strings.Contains(corpus, keyword) {
+				return keyword
+			}
+			continue
+		}
+		if hasWholeWord(corpus, keyword) {
+			return keyword
+		}
+	}
+	return ""
 }
 
 func defaultNodeIPConnectionLookup(ctx context.Context, ip string) nodeIPConnectionLookupResult {
@@ -207,11 +249,14 @@ func classifyNodeIntelligence(node NodeRecord, cfg ValidationConfig, lookup node
 			result.Cleanliness = CleanlinessTrusted
 			result.CleanlinessConfidence = result.NetworkConfidence
 			result.CleanlinessReason = nodeIntelligenceReasonResidentialStableExit
-			result.CleanlinessDetail = "the exit network looks like an access ISP and the node's probe history is stable"
+			result.CleanlinessDetail = "the exit network looks like a residential broadband ISP and the node's probe history is stable"
 			return result
 		}
 		result.CleanlinessReason = nodeIntelligenceReasonInsufficientSignal
-		result.CleanlinessDetail = "the exit network looks like an access ISP, but probe history is still too weak to promote cleanliness confidence"
+		result.CleanlinessDetail = "the exit network looks residential, but probe history is still too weak to promote cleanliness confidence"
+	case NodeNetworkTypeISPLikely:
+		result.CleanlinessReason = nodeIntelligenceReasonInsufficientSignal
+		result.CleanlinessDetail = "the exit network looks like an access ISP, but not strongly enough to treat it like residential"
 	default:
 		result.CleanlinessReason = nodeIntelligenceReasonInsufficientSignal
 		result.CleanlinessDetail = "the node did not produce enough network-identity signal for a reliable cleanliness verdict"
@@ -235,23 +280,14 @@ func classifyNodeNetworkType(lookup nodeIPConnectionLookupResult) (NodeNetworkTy
 	if keyword := firstMatchingKeyword(corpus, hostingProviderKeywords); keyword != "" {
 		return NodeNetworkTypeDatacenterLikely, NodeIntelligenceConfidenceHigh, nodeIntelligenceReasonHostingKeywordMatch, fmt.Sprintf("connection metadata matched hosting keyword %q (org=%q isp=%q domain=%q)", keyword, lookup.Org, lookup.ISP, lookup.Domain)
 	}
-	if keyword := firstMatchingKeyword(corpus, residentialISPKeywords); keyword != "" {
-		return NodeNetworkTypeResidentialLikely, NodeIntelligenceConfidenceMedium, nodeIntelligenceReasonResidentialKeyword, fmt.Sprintf("connection metadata matched access-ISP keyword %q (org=%q isp=%q domain=%q)", keyword, lookup.Org, lookup.ISP, lookup.Domain)
+	if keyword := firstMatchingKeyword(corpus, residentialProviderKeywords); keyword != "" {
+		return NodeNetworkTypeResidentialLikely, NodeIntelligenceConfidenceMedium, nodeIntelligenceReasonResidentialKeyword, fmt.Sprintf("connection metadata matched residential keyword %q (org=%q isp=%q domain=%q)", keyword, lookup.Org, lookup.ISP, lookup.Domain)
+	}
+	if keyword := firstMatchingKeyword(corpus, ispProviderKeywords); keyword != "" {
+		return NodeNetworkTypeISPLikely, NodeIntelligenceConfidenceMedium, nodeIntelligenceReasonISPKeywordMatch, fmt.Sprintf("connection metadata matched ISP keyword %q (org=%q isp=%q domain=%q)", keyword, lookup.Org, lookup.ISP, lookup.Domain)
 	}
 
 	return NodeNetworkTypeUnknown, NodeIntelligenceConfidenceLow, nodeIntelligenceReasonInsufficientSignal, fmt.Sprintf("connection metadata stayed inconclusive (org=%q isp=%q domain=%q asn=%d)", lookup.Org, lookup.ISP, lookup.Domain, lookup.ASN)
-}
-
-func firstMatchingKeyword(corpus string, keywords []string) string {
-	if strings.TrimSpace(corpus) == "" {
-		return ""
-	}
-	for _, keyword := range keywords {
-		if strings.Contains(corpus, keyword) {
-			return keyword
-		}
-	}
-	return ""
 }
 
 func isNodeProbeFailureSuspicious(node NodeRecord, cfg ValidationConfig) bool {

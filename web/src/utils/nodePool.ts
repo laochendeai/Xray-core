@@ -6,6 +6,7 @@ import type {
 
 export type PoolSortMode =
   | "quality"
+  | "cleanliness_desc"
   | "last_checked_desc"
   | "last_checked_asc"
   | "fail_rate_asc"
@@ -26,6 +27,7 @@ export interface NodeIntelligenceSummary {
   suspiciousCount: number;
   unknownCleanCount: number;
   residentialCount: number;
+  ispLikeCount: number;
   datacenterCount: number;
   unknownNetworkCount: number;
 }
@@ -87,10 +89,12 @@ function bindingNetworkRank(value: NodeRecord["networkType"]): number {
       return 0;
     case "unknown":
       return 1;
-    case "datacenter_likely":
+    case "isp_likely":
       return 2;
-    default:
+    case "datacenter_likely":
       return 3;
+    default:
+      return 4;
   }
 }
 
@@ -189,6 +193,12 @@ function compareNodesByQuality(a: NodeRecord, b: NodeRecord): number {
   return checkedAtValue(b) - checkedAtValue(a);
 }
 
+function comparePoolCleanliness(a: NodeRecord, b: NodeRecord): number {
+  const diff = bindingCleanlinessRank(a.cleanliness) - bindingCleanlinessRank(b.cleanliness);
+  if (diff !== 0) return diff;
+  return compareNodesByQuality(a, b);
+}
+
 function compareNullableMetric(
   aValue: number | null,
   bValue: number | null,
@@ -206,6 +216,8 @@ export function sortPoolNodes(
 ): NodeRecord[] {
   return [...entries].sort((a, b) => {
     switch (mode) {
+      case "cleanliness_desc":
+        return comparePoolCleanliness(a, b);
       case "last_checked_desc":
         return checkedAtValue(b) - checkedAtValue(a);
       case "last_checked_asc":
@@ -315,6 +327,9 @@ export function summarizeNodeIntelligence(
         case "residential_likely":
           summary.residentialCount += 1;
           break;
+        case "isp_likely":
+          summary.ispLikeCount += 1;
+          break;
         case "datacenter_likely":
           summary.datacenterCount += 1;
           break;
@@ -330,6 +345,7 @@ export function summarizeNodeIntelligence(
       suspiciousCount: 0,
       unknownCleanCount: 0,
       residentialCount: 0,
+      ispLikeCount: 0,
       datacenterCount: 0,
       unknownNetworkCount: 0,
     },

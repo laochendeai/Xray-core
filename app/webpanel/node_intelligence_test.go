@@ -79,6 +79,47 @@ func TestClassifyNodeIntelligenceMarksResidentialStableExitTrusted(t *testing.T)
 	}
 }
 
+func TestClassifyNodeIntelligenceMarksISPLikeExitUnknown(t *testing.T) {
+	t.Parallel()
+
+	cfg := defaultValidationConfig()
+	cfg.MinSamples = 10
+	cfg.MaxFailRate = 0.30
+	cfg.MaxAvgDelayMs = 1000
+
+	result := classifyNodeIntelligence(
+		NodeRecord{
+			ExitIPStatus:     NodeExitIPStatusAvailable,
+			ExitIP:           "198.51.100.20",
+			TotalPings:       20,
+			FailedPings:      0,
+			AvgDelayMs:       110,
+			ConsecutiveFails: 0,
+		},
+		cfg,
+		nodeIPConnectionLookupResult{
+			ASN:       64512,
+			Org:       "Example Telecom Communications",
+			ISP:       "Example Telecom Communications",
+			Domain:    "example.net",
+			CheckedAt: time.Now().UTC(),
+		},
+	)
+
+	if result.NetworkType != NodeNetworkTypeISPLikely {
+		t.Fatalf("expected isp-likely network type, got %q", result.NetworkType)
+	}
+	if result.Cleanliness != CleanlinessUnknown {
+		t.Fatalf("expected unknown cleanliness, got %q", result.Cleanliness)
+	}
+	if result.NetworkReason != nodeIntelligenceReasonISPKeywordMatch {
+		t.Fatalf("expected isp keyword reason, got %q", result.NetworkReason)
+	}
+	if result.CleanlinessReason != nodeIntelligenceReasonInsufficientSignal {
+		t.Fatalf("expected insufficient signal cleanliness reason, got %q", result.CleanlinessReason)
+	}
+}
+
 func TestClassifyNodeIntelligenceKeepsLowSignalUnknown(t *testing.T) {
 	t.Parallel()
 

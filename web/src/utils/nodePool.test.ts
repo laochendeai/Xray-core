@@ -55,6 +55,30 @@ describe("node pool utilities", () => {
   });
 
   it("sorts pool nodes by quality and explicit metric modes", () => {
+    const trusted = makeNode({
+      id: "trusted",
+      cleanliness: "trusted",
+      totalPings: 20,
+      failedPings: 0,
+      avgDelayMs: 120,
+      lastCheckedAt: "2026-01-03T00:00:00Z",
+    });
+    const unknownClean = makeNode({
+      id: "unknown",
+      cleanliness: "unknown",
+      totalPings: 20,
+      failedPings: 2,
+      avgDelayMs: 200,
+      lastCheckedAt: "2026-01-02T00:00:00Z",
+    });
+    const suspicious = makeNode({
+      id: "suspicious",
+      cleanliness: "suspicious",
+      totalPings: 0,
+      failedPings: 0,
+      avgDelayMs: 0,
+      lastCheckedAt: "2026-01-04T00:00:00Z",
+    });
     const highQuality = makeNode({
       id: "high",
       totalPings: 20,
@@ -70,7 +94,7 @@ describe("node pool utilities", () => {
       lastCheckedAt: "2026-01-02T00:00:00Z",
     });
     const unknownQuality = makeNode({
-      id: "unknown",
+      id: "unknown-quality",
       totalPings: 0,
       failedPings: 0,
       avgDelayMs: 0,
@@ -78,11 +102,16 @@ describe("node pool utilities", () => {
     });
 
     expect(
+      sortPoolNodes([unknownClean, suspicious, trusted], "cleanliness_desc").map(
+        (node) => node.id,
+      ),
+    ).toEqual(["trusted", "unknown", "suspicious"]);
+    expect(
       sortPoolNodes(
         [mediumQuality, unknownQuality, highQuality],
         "quality",
       ).map((node) => node.id),
-    ).toEqual(["high", "medium", "unknown"]);
+    ).toEqual(["high", "medium", "unknown-quality"]);
     expect(
       sortPoolNodes([mediumQuality, highQuality], "last_checked_desc").map(
         (node) => node.id,
@@ -146,20 +175,106 @@ describe("node pool utilities", () => {
       networkType: "unknown",
     });
 
+    const ispLike = makeNode({
+      id: "isp-like",
+      cleanliness: "unknown",
+      networkType: "isp_likely",
+    });
+
     expect(
       summarizeNodeIntelligence([
         trustedResidential,
         suspiciousDatacenter,
         unknown,
+        ispLike,
       ]),
     ).toEqual({
       trustedCount: 1,
       suspiciousCount: 1,
-      unknownCleanCount: 1,
+      unknownCleanCount: 2,
       residentialCount: 1,
+      ispLikeCount: 1,
       datacenterCount: 1,
       unknownNetworkCount: 1,
     });
+  });
+
+  it("keeps isp-like nodes below residential for destination bindings", () => {
+    const ispLike = makeNode({
+      id: "isp-like",
+      cleanliness: "trusted",
+      networkType: "isp_likely",
+      exitIpStatus: "available",
+      totalPings: 20,
+      failedPings: 0,
+      avgDelayMs: 40,
+    });
+    const residentialStable = makeNode({
+      id: "residential-stable",
+      cleanliness: "trusted",
+      networkType: "residential_likely",
+      exitIpStatus: "available",
+      totalPings: 20,
+      failedPings: 1,
+      avgDelayMs: 80,
+    });
+
+    expect(sortBindingNodes([ispLike, residentialStable]).map((node) => node.id)).toEqual([
+      "residential-stable",
+      "isp-like",
+    ]);
+  });
+
+  it("keeps isp-like nodes above datacenter nodes for destination bindings", () => {
+    const datacenterFast = makeNode({
+      id: "datacenter-fast",
+      cleanliness: "trusted",
+      networkType: "datacenter_likely",
+      exitIpStatus: "available",
+      totalPings: 20,
+      failedPings: 0,
+      avgDelayMs: 30,
+    });
+    const ispLike = makeNode({
+      id: "isp-like",
+      cleanliness: "trusted",
+      networkType: "isp_likely",
+      exitIpStatus: "available",
+      totalPings: 20,
+      failedPings: 0,
+      avgDelayMs: 40,
+    });
+
+    expect(sortBindingNodes([datacenterFast, ispLike]).map((node) => node.id)).toEqual([
+      "isp-like",
+      "datacenter-fast",
+    ]);
+  });
+
+  it("prefers unknown nodes above isp-like nodes for destination bindings", () => {
+    const unknownStable = makeNode({
+      id: "unknown-stable",
+      cleanliness: "trusted",
+      networkType: "unknown",
+      exitIpStatus: "available",
+      totalPings: 20,
+      failedPings: 0,
+      avgDelayMs: 50,
+    });
+    const ispLike = makeNode({
+      id: "isp-like",
+      cleanliness: "trusted",
+      networkType: "isp_likely",
+      exitIpStatus: "available",
+      totalPings: 20,
+      failedPings: 0,
+      avgDelayMs: 40,
+    });
+
+    expect(sortBindingNodes([ispLike, unknownStable]).map((node) => node.id)).toEqual([
+      "unknown-stable",
+      "isp-like",
+    ]);
   });
 
   it("picks the first usable intelligence detail", () => {

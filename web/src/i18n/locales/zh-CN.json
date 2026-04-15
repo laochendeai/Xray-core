@@ -590,7 +590,15 @@
     "destinationBindingsNoActiveNodes": "当前没有可选的活跃节点，先让节点进入活跃池后再配置绑定。",
     "destinationBindingAdd": "新增绑定",
     "destinationBindingPreset": "目标类型",
-    "destinationBindingNode": "目标节点",
+    "destinationBindingSelectionMode": "选择模式",
+    "destinationBindingSelectionModeOptions": {
+      "primary_only": "仅主节点",
+      "failover_ordered": "按顺序故障切换",
+      "failover_fastest": "最快故障切换"
+    },
+    "destinationBindingNode": "主节点",
+    "destinationBindingFallbackNodes": "备用节点",
+    "destinationBindingFallbackNodesPlaceholder": "按优先级选择备用节点",
     "destinationBindingDomains": "自定义域名",
     "destinationBindingDomainsPlaceholder": "每行一个域名规则，例如:\ndomain:example.com\nfull:api.example.com\n*.service.example",
     "destinationBindingResolvedDomains": "生效域名: {domains}",
@@ -651,7 +659,7 @@
       "avg_delay_desc": "按平均延迟从高到低"
     },
     "poolSortOptions": {
-      "quality": "默认质量排序",
+      "cleanliness_desc": "可信/干净优先",
       "last_checked_desc": "按最近探测排序",
       "last_checked_asc": "按最早探测排序",
       "fail_rate_asc": "按失败率从低到高",
@@ -681,6 +689,7 @@
     "networkType": {
       "unknown": "网络未知",
       "residential_likely": "家宽倾向",
+      "isp_likely": "运营商倾向",
       "datacenter_likely": "机房倾向"
     },
     "confidence": {
@@ -698,7 +707,8 @@
       "exit_ip_unavailable": "没有可用的出口 IP",
       "lookup_failed": "出口 IP 情报查询失败",
       "hosting_keyword_match": "命中机房/云厂商特征",
-      "residential_keyword_match": "命中家宽/接入运营商特征",
+      "isp_keyword_match": "命中运营商/接入网特征",
+      "residential_keyword_match": "命中家宽特征",
       "probe_failure_rate_high": "失败率过高",
       "residential_stable_exit": "家宽出口且探测稳定",
       "datacenter_exit_network": "出口更像机房网络",
