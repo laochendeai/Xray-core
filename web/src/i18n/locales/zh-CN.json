@@ -659,6 +659,7 @@
       "avg_delay_desc": "按平均延迟从高到低"
     },
     "poolSortOptions": {
+      "quality": "默认质量排序",
       "cleanliness_desc": "可信/干净优先",
       "last_checked_desc": "按最近探测排序",
       "last_checked_asc": "按最早探测排序",

@@ -659,6 +659,7 @@
       "avg_delay_desc": "Avg delay high to low"
     },
     "poolSortOptions": {
+      "quality": "Default Quality Order",
       "cleanliness_desc": "Trusted / Clean First",
       "last_checked_desc": "Newest probe first",
       "last_checked_asc": "Oldest probe first",
