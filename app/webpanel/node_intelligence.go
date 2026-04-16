@@ -64,10 +64,11 @@ type nodeIntelligenceResult struct {
 const nodeIntelligenceLookupTimeout = 5 * time.Second
 
 var hostingProviderKeywords = []string{
-	"amazon", "amazonaws", "aws", "azure", "digitalocean", "linode", "akamai",
-	"google cloud", "google llc", "gcp", "vultr", "hetzner", "ovh", "oracle cloud",
+	"amazon", "amazonaws", "aws", "azure", "microsoft azure", "microsoft corporation",
+	"digitalocean", "digital ocean", "linode", "akamai", "google cloud", "google llc", "gcp",
+	"vultr", "hetzner", "ovh", "ovhcloud", "oracle cloud", "cloudflare",
 	"alibaba cloud", "tencent cloud", "choopa", "leaseweb", "scaleway", "contabo",
-	"racknerd", "pq.hosting", "hostinger", "cloud", "hosting", "colo", "vps",
+	"racknerd", "pq.hosting", "hostinger", "greenhost", "cloud", "hosting", "colo", "vps",
 	"server", "datacenter", "compute",
 }
 
