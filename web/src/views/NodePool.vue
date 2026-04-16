@@ -556,15 +556,35 @@
                               :options="destinationBindingPresetOptions"
                             />
                           </div>
-                          <div class="destination-binding-field">
-                            <div class="destination-binding-label">
-                              {{ t("nodePool.destinationBindingNode") }}
-                            </div>
-                            <n-select
-                              v-model:value="binding.nodeId"
-                              :options="bindingNodeOptions(binding)"
-                            />
-                          </div>
+      <div class="destination-binding-field">
+        <div class="destination-binding-label">
+          {{ t("nodePool.destinationBindingSelectionMode") }}
+        </div>
+        <n-select
+          v-model:value="binding.selectionMode"
+          :options="destinationBindingSelectionModeOptions"
+        />
+      </div>
+      <div class="destination-binding-field">
+        <div class="destination-binding-label">
+          {{ t("nodePool.destinationBindingNode") }}
+        </div>
+        <n-select
+          v-model:value="binding.nodeId"
+          :options="bindingNodeOptions(binding)"
+        />
+      </div>
+      <div class="destination-binding-field">
+        <div class="destination-binding-label">
+          {{ t("nodePool.destinationBindingFallbackNodes") }}
+        </div>
+        <n-select
+          v-model:value="binding.fallbackNodeIds"
+          multiple
+          :options="bindingFallbackNodeOptions(binding)"
+          :placeholder="t('nodePool.destinationBindingFallbackNodesPlaceholder')"
+        />
+      </div>
                         </div>
                         <div
                           v-if="binding.preset === 'custom'"
@@ -722,6 +742,14 @@
         </div>
         <div class="summary-value">
           {{ intelligenceSummary.residentialCount }}
+        </div>
+      </div>
+      <div class="summary-item">
+        <div class="summary-label">
+          {{ t("nodePool.networkType.isp_likely") }}
+        </div>
+        <div class="summary-value">
+          {{ intelligenceSummary.ispLikeCount }}
         </div>
       </div>
       <div class="summary-item">
@@ -1796,6 +1824,7 @@ import type {
   TunAggregationRuntimePath,
   TunDestinationBinding,
   TunDestinationBindingPreset,
+  TunDestinationBindingSelectionMode,
   TunEditableSettings,
   TunRouteMode,
   TunSelectionPolicy,
@@ -1993,6 +2022,8 @@ interface DestinationBindingDraft {
   preset: TunDestinationBindingPreset;
   domainsText: string;
   nodeId: string;
+  fallbackNodeIds: string[];
+  selectionMode: TunDestinationBindingSelectionMode;
 }
 
 interface DestinationBindingTestResult {
@@ -2333,6 +2364,21 @@ const destinationBindingPresetOptions = computed(() => [
   },
 ]);
 
+const destinationBindingSelectionModeOptions = computed(() => [
+  {
+    label: t("nodePool.destinationBindingSelectionModeOptions.primary_only"),
+    value: "primary_only" as TunDestinationBindingSelectionMode,
+  },
+  {
+    label: t("nodePool.destinationBindingSelectionModeOptions.failover_ordered"),
+    value: "failover_ordered" as TunDestinationBindingSelectionMode,
+  },
+  {
+    label: t("nodePool.destinationBindingSelectionModeOptions.failover_fastest"),
+    value: "failover_fastest" as TunDestinationBindingSelectionMode,
+  },
+]);
+
 const removedSortOptions = computed(() => [
   {
     label: t("nodePool.removedSortOptions.removed_desc"),
@@ -2363,8 +2409,8 @@ const removedSortOptions = computed(() => [
 const poolSortOptions = computed(() => [
   { label: t("nodePool.poolSortOptions.quality"), value: "quality" as const },
   {
-    label: t("nodePool.poolSortOptions.last_checked_desc"),
-    value: "last_checked_desc" as const,
+    label: t("nodePool.poolSortOptions.cleanliness_desc"),
+    value: "cleanliness_desc" as const,
   },
   {
     label: t("nodePool.poolSortOptions.last_checked_asc"),
@@ -2620,6 +2666,8 @@ function networkTypeTagType(networkType: NodeNetworkType) {
   switch (networkType) {
     case "residential_likely":
       return "success";
+    case "isp_likely":
+      return "warning";
     case "datacenter_likely":
       return "warning";
     default:
@@ -3187,6 +3235,10 @@ function bindingToDraft(
       ? binding.domains.join("\n")
       : "",
     nodeId: binding.nodeId || "",
+    selectionMode: binding.selectionMode || "primary_only",
+    fallbackNodeIds: Array.isArray(binding.fallbackNodeIds)
+      ? binding.fallbackNodeIds
+      : [],
   };
 }
 
@@ -3200,6 +3252,8 @@ function draftToBinding(
         ? normalizeListInput(binding.domainsText)
         : [],
     nodeId: binding.nodeId,
+    selectionMode: binding.selectionMode,
+    fallbackNodeIds: binding.fallbackNodeIds,
   };
 }
 
@@ -3216,6 +3270,8 @@ function addDestinationBindingDraft() {
     preset: "openai",
     domainsText: "",
     nodeId: bindingPreferredNodeId(activeNodes.value),
+    selectionMode: "primary_only",
+    fallbackNodeIds: [],
   });
 }
 
@@ -3262,6 +3318,18 @@ function bindingNodeOptions(binding: DestinationBindingDraft) {
       disabled: true,
     });
   }
+  return options;
+}
+
+function bindingFallbackNodeOptions(binding: DestinationBindingDraft) {
+  const selected = new Set([binding.nodeId, ...binding.fallbackNodeIds]);
+  const options: SelectOption[] = sortBindingNodes(activeNodes.value)
+    .filter((node) => node.id !== binding.nodeId)
+    .map((node) => ({
+      label: bindingNodeOptionLabel(node),
+      value: node.id,
+    }))
+    .filter((option) => !selected.has(String(option.value)));
   return options;
 }
 

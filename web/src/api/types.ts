@@ -179,6 +179,7 @@ export type NodeExitIPStatus = "unknown" | "available" | "error";
 export type NodeNetworkType =
   | "unknown"
   | "residential_likely"
+  | "isp_likely"
   | "datacenter_likely";
 export type NodeIntelligenceConfidence = "unknown" | "low" | "medium" | "high";
 export type MachineState = "clean" | "proxied" | "degraded" | "recovering";
@@ -520,10 +521,17 @@ export type TunDestinationBindingPreset =
   | "deepseek"
   | "custom";
 
+export type TunDestinationBindingSelectionMode =
+  | "primary_only"
+  | "failover_ordered"
+  | "failover_fastest";
+
 export interface TunDestinationBinding {
   preset: TunDestinationBindingPreset;
   domains: string[];
   nodeId: string;
+  fallbackNodeIds?: string[];
+  selectionMode?: TunDestinationBindingSelectionMode;
 }
 
 export interface TunEditableSettings {

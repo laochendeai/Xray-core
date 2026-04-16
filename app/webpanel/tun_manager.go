@@ -60,6 +60,7 @@ var (
 type TunSelectionPolicy string
 type TunRouteMode string
 type TunDestinationBindingPreset string
+type TunDestinationBindingSelectionMode string
 type TunAggregationMode string
 type TunAggregationSchedulerPolicy string
 type TunAggregationRuntimePath string
@@ -88,6 +89,12 @@ const (
 	TunDestinationBindingPresetPerplexity    TunDestinationBindingPreset = "perplexity"
 	TunDestinationBindingPresetDeepSeek      TunDestinationBindingPreset = "deepseek"
 	TunDestinationBindingPresetCustom        TunDestinationBindingPreset = "custom"
+)
+
+const (
+	TunDestinationBindingSelectionModePrimaryOnly     TunDestinationBindingSelectionMode = "primary_only"
+	TunDestinationBindingSelectionModeFailoverOrdered TunDestinationBindingSelectionMode = "failover_ordered"
+	TunDestinationBindingSelectionModeFailoverFastest TunDestinationBindingSelectionMode = "failover_fastest"
 )
 
 const (
@@ -184,9 +191,11 @@ type TunManager struct {
 }
 
 type TunDestinationBinding struct {
-	Preset  string   `json:"preset"`
-	Domains []string `json:"domains,omitempty"`
-	NodeID  string   `json:"nodeId"`
+	Preset          string   `json:"preset"`
+	Domains         []string `json:"domains,omitempty"`
+	NodeID          string   `json:"nodeId"`
+	FallbackNodeIDs []string `json:"fallbackNodeIds,omitempty"`
+	SelectionMode   string   `json:"selectionMode,omitempty"`
 }
 
 type TunAggregationHealthSettings struct {
@@ -1730,17 +1739,18 @@ func buildTunDestinationBindingRules(settings *TunFeatureSettings, activeNodes [
 		return nil
 	}
 
-	activeNodeIDs := make(map[string]struct{}, len(activeNodes))
+	activeNodeMap := make(map[string]NodeRecord, len(activeNodes))
 	for _, node := range activeNodes {
 		if strings.TrimSpace(node.ID) == "" {
 			continue
 		}
-		activeNodeIDs[node.ID] = struct{}{}
+		activeNodeMap[node.ID] = node
 	}
 
 	rules := make([]interface{}, 0, len(settings.DestinationBindings))
 	for _, binding := range normalizeTunDestinationBindings(settings.DestinationBindings) {
-		if _, ok := activeNodeIDs[binding.NodeID]; !ok {
+		targetID := selectTunDestinationBindingNode(binding, activeNodeMap)
+		if targetID == "" {
 			continue
 		}
 
@@ -1752,10 +1762,45 @@ func buildTunDestinationBindingRules(settings *TunFeatureSettings, activeNodes [
 		rules = append(rules, map[string]interface{}{
 			"type":        "field",
 			"domain":      domains,
-			"outboundTag": buildTunOutboundTag(binding.NodeID),
+			"outboundTag": buildTunOutboundTag(targetID),
 		})
 	}
 	return rules
+}
+
+func selectTunDestinationBindingNode(binding TunDestinationBinding, activeNodeMap map[string]NodeRecord) string {
+	selectionMode := normalizeTunDestinationBindingSelectionMode(binding.SelectionMode)
+	candidateIDs := make([]string, 0, 1+len(binding.FallbackNodeIDs))
+	candidateIDs = append(candidateIDs, binding.NodeID)
+	candidateIDs = append(candidateIDs, binding.FallbackNodeIDs...)
+
+	switch selectionMode {
+	case TunDestinationBindingSelectionModeFailoverFastest:
+		candidates := make([]NodeRecord, 0, len(candidateIDs))
+		for _, candidateID := range candidateIDs {
+			if node, ok := activeNodeMap[candidateID]; ok {
+				candidates = append(candidates, node)
+			}
+		}
+		if len(candidates) == 0 {
+			return ""
+		}
+		return bestNodeByFastestPriority(candidates).ID
+	case TunDestinationBindingSelectionModeFailoverOrdered:
+		fallthrough
+	case TunDestinationBindingSelectionModePrimaryOnly:
+		for _, candidateID := range candidateIDs {
+			if _, ok := activeNodeMap[candidateID]; ok {
+				return candidateID
+			}
+			if selectionMode == TunDestinationBindingSelectionModePrimaryOnly {
+				break
+			}
+		}
+		return ""
+	default:
+		return ""
+	}
 }
 
 func normalizeTunSelectionPolicy(value string) TunSelectionPolicy {
@@ -1961,6 +2006,17 @@ func normalizeTunDestinationBindingPreset(value string) TunDestinationBindingPre
 	}
 }
 
+func normalizeTunDestinationBindingSelectionMode(value string) TunDestinationBindingSelectionMode {
+	switch TunDestinationBindingSelectionMode(strings.ToLower(strings.TrimSpace(value))) {
+	case TunDestinationBindingSelectionModeFailoverOrdered:
+		return TunDestinationBindingSelectionModeFailoverOrdered
+	case TunDestinationBindingSelectionModeFailoverFastest:
+		return TunDestinationBindingSelectionModeFailoverFastest
+	default:
+		return TunDestinationBindingSelectionModePrimaryOnly
+	}
+}
+
 func normalizeTunDestinationBindings(bindings []TunDestinationBinding) []TunDestinationBinding {
 	result := make([]TunDestinationBinding, 0, len(bindings))
 	seen := make(map[string]struct{}, len(bindings))
@@ -1969,7 +2025,7 @@ func normalizeTunDestinationBindings(bindings []TunDestinationBinding) []TunDest
 		if !ok {
 			continue
 		}
-		key := next.Preset + "|" + next.NodeID + "|" + strings.Join(next.Domains, ",")
+		key := next.Preset + "|" + next.NodeID + "|" + next.SelectionMode + "|" + strings.Join(next.FallbackNodeIDs, ",") + "|" + strings.Join(next.Domains, ",")
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -1986,9 +2042,29 @@ func normalizeTunDestinationBinding(binding TunDestinationBinding) (TunDestinati
 	}
 
 	preset := normalizeTunDestinationBindingPreset(binding.Preset)
+	selectionMode := normalizeTunDestinationBindingSelectionMode(binding.SelectionMode)
+	fallbackNodeIDs := make([]string, 0, len(binding.FallbackNodeIDs))
+	seenFallbacks := make(map[string]struct{}, len(binding.FallbackNodeIDs))
+	for _, candidate := range binding.FallbackNodeIDs {
+		next := strings.TrimSpace(candidate)
+		if next == "" || next == nodeID {
+			continue
+		}
+		if _, exists := seenFallbacks[next]; exists {
+			continue
+		}
+		seenFallbacks[next] = struct{}{}
+		fallbackNodeIDs = append(fallbackNodeIDs, next)
+	}
+	if selectionMode == TunDestinationBindingSelectionModePrimaryOnly && len(fallbackNodeIDs) > 0 {
+		selectionMode = TunDestinationBindingSelectionModeFailoverOrdered
+	}
+
 	normalized := TunDestinationBinding{
-		Preset: string(preset),
-		NodeID: nodeID,
+		Preset:          string(preset),
+		NodeID:          nodeID,
+		FallbackNodeIDs: fallbackNodeIDs,
+		SelectionMode:   string(selectionMode),
 	}
 	if preset == TunDestinationBindingPresetCustom {
 		normalized.Domains = normalizeTunDomainRules(binding.Domains)
@@ -2021,10 +2097,13 @@ func tunDestinationBindingsFromAny(raw interface{}) []TunDestinationBinding {
 			}
 			preset, _ := entry["preset"].(string)
 			nodeID, _ := entry["nodeId"].(string)
+			selectionMode, _ := entry["selectionMode"].(string)
 			result = append(result, TunDestinationBinding{
-				Preset:  strings.TrimSpace(preset),
-				Domains: stringSliceFromAny(entry["domains"]),
-				NodeID:  strings.TrimSpace(nodeID),
+				Preset:          strings.TrimSpace(preset),
+				Domains:         stringSliceFromAny(entry["domains"]),
+				NodeID:          strings.TrimSpace(nodeID),
+				FallbackNodeIDs: stringSliceFromAny(entry["fallbackNodeIds"]),
+				SelectionMode:   strings.TrimSpace(selectionMode),
 			})
 		}
 		return result
