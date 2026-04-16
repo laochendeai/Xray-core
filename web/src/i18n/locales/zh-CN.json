@@ -44,6 +44,7 @@
     "users": "用户管理",
     "routing": "路由规则",
     "dns": "DNS 配置",
+    "privacy": "隐私诊断",
     "monitor": "实时监控",
     "settings": "系统设置",
     "config": "配置管理",
@@ -590,15 +591,7 @@
     "destinationBindingsNoActiveNodes": "当前没有可选的活跃节点，先让节点进入活跃池后再配置绑定。",
     "destinationBindingAdd": "新增绑定",
     "destinationBindingPreset": "目标类型",
-    "destinationBindingSelectionMode": "选择模式",
-    "destinationBindingSelectionModeOptions": {
-      "primary_only": "仅主节点",
-      "failover_ordered": "按顺序故障切换",
-      "failover_fastest": "最快故障切换"
-    },
-    "destinationBindingNode": "主节点",
-    "destinationBindingFallbackNodes": "备用节点",
-    "destinationBindingFallbackNodesPlaceholder": "按优先级选择备用节点",
+    "destinationBindingNode": "目标节点",
     "destinationBindingDomains": "自定义域名",
     "destinationBindingDomainsPlaceholder": "每行一个域名规则，例如:\ndomain:example.com\nfull:api.example.com\n*.service.example",
     "destinationBindingResolvedDomains": "生效域名: {domains}",
@@ -660,7 +653,6 @@
     },
     "poolSortOptions": {
       "quality": "默认质量排序",
-      "cleanliness_desc": "可信/干净优先",
       "last_checked_desc": "按最近探测排序",
       "last_checked_asc": "按最早探测排序",
       "fail_rate_asc": "按失败率从低到高",
@@ -690,7 +682,6 @@
     "networkType": {
       "unknown": "网络未知",
       "residential_likely": "家宽倾向",
-      "isp_likely": "运营商倾向",
       "datacenter_likely": "机房倾向"
     },
     "confidence": {
@@ -708,8 +699,7 @@
       "exit_ip_unavailable": "没有可用的出口 IP",
       "lookup_failed": "出口 IP 情报查询失败",
       "hosting_keyword_match": "命中机房/云厂商特征",
-      "isp_keyword_match": "命中运营商/接入网特征",
-      "residential_keyword_match": "命中家宽特征",
+      "residential_keyword_match": "命中家宽/接入运营商特征",
       "probe_failure_rate_high": "失败率过高",
       "residential_stable_exit": "家宽出口且探测稳定",
       "datacenter_exit_network": "出口更像机房网络",
@@ -755,5 +745,40 @@
       "poolWarningTitle": "节点池还不够稳定",
       "degradedTitle": "机器已降级，需要检查"
     }
+  },
+  "privacy": {
+    "title": "隐私诊断",
+    "subtitle": "从浏览器侧运行第一阶段 DNS 与 WebRTC 泄漏检查，并结合当前透明模式运行上下文解释结果。",
+    "firstPhaseTitle": "第一阶段隐私检查",
+    "firstPhaseBody": "第一阶段只聚焦 DNS 与 WebRTC 泄漏。IP 地理定位、VPN 判断和浏览器指纹检查后续再扩展，避免第一版页面过于混杂。",
+    "unsupported": "当前无法提供隐私诊断，因为本地透明模式/运行时上下文不可用。",
+    "runtimeContextTitle": "运行时上下文",
+    "tunRunning": "透明模式是否运行中",
+    "routeMode": "路由模式",
+    "remoteDns": "远端 DNS 解析器",
+    "directEgress": "直连出口 IP",
+    "proxyEgress": "代理出口 IP",
+    "dnsTitle": "DNS 泄漏检查",
+    "runDnsCheck": "运行 DNS 检查",
+    "dnsUnknownTitle": "尚未执行 DNS 检查",
+    "dnsLowRiskTitle": "暂未看到明显 DNS 泄漏信号",
+    "dnsWarningTitle": "DNS 泄漏风险需要关注",
+    "dnsSummaryIdle": "运行 DNS 检查，把浏览器侧观察结果和当前透明模式上下文进行对照。",
+    "dnsTunRunning": "透明模式当前处于运行中。",
+    "dnsTunStopped": "透明模式当前未运行。",
+    "dnsExpectedResolvers": "当前配置的远端 DNS：{resolvers}",
+    "dnsAutoTestedHint": "按测试自动决定直连/代理模式下，部分目标仍可能保留直连路径。",
+    "dnsStrictProxyHint": "严格代理模式下，DNS 与流量更应倾向代理路径。",
+    "webrtcTitle": "WebRTC 泄漏检查",
+    "runWebRtcCheck": "运行 WebRTC 检查",
+    "webrtcUnsupported": "当前浏览器不支持 WebRTC 候选采集接口。",
+    "webrtcUnknownTitle": "尚未执行 WebRTC 检查",
+    "webrtcLowRiskTitle": "暂未看到明显 WebRTC 泄漏信号",
+    "webrtcWarningTitle": "WebRTC 泄漏风险需要关注",
+    "webrtcSummaryIdle": "运行 WebRTC 检查，采集 ICE 候选并观察浏览器暴露了哪些地址信息。",
+    "webrtcCandidateCount": "已采集 {count} 个 ICE 候选",
+    "webrtcPrivateExposed": "检测到本地/私网地址候选暴露",
+    "webrtcPublicExposed": "检测到公网 reflexive 候选暴露",
+    "webrtcNoExposure": "暂未观察到私网或公网泄漏型候选"
   }
 }

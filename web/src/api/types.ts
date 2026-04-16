@@ -543,3 +543,47 @@ export interface TunEditableSettings {
   destinationBindings: TunDestinationBinding[];
   aggregation: TunAggregationSettings;
 }
+export interface PrivacyDiagnosticsContextResponse {
+  supported: boolean;
+  unsupportedReason?: string;
+  tunStatus?: TunStatusResponse;
+  tunSettings?: TunEditableSettings;
+}
+
+export interface PrivacyWebRTCCandidate {
+  candidate: string;
+  type: string;
+  protocol: string;
+  address: string;
+  port: number | null;
+  isPrivateAddress: boolean;
+}
+
+export interface PrivacyWebRTCResult {
+  supported: boolean;
+  gathered: boolean;
+  leakRisk: "unknown" | "low" | "warning" | "high";
+  exposedPrivateAddress: boolean;
+  exposedPublicAddress: boolean;
+  candidates: PrivacyWebRTCCandidate[];
+  error?: string;
+}
+
+export interface PrivacyDnsResult {
+  leakRisk: "unknown" | "low" | "warning";
+  expectedRemoteDns: string[];
+  tunRunning: boolean;
+  routeMode: TunRouteMode | string;
+  notes: string[];
+}
+
+export interface PrivacyDiagnosticsRun {
+  dns: PrivacyDnsResult;
+  webrtc: PrivacyWebRTCResult;
+}
+
+export interface PrivacyDiagnosticsPageState {
+  context?: PrivacyDiagnosticsContextResponse;
+  run?: PrivacyDiagnosticsRun;
+}
+
