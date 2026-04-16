@@ -18,11 +18,18 @@ require_cmd go
 require_cmd node
 require_cmd npm
 require_cmd python3
+require_cmd git
 
 cd "$ROOT_DIR"
 
 log "Go webpanel tests"
 go test ./app/webpanel/...
+
+log "Locale sync"
+bash scripts/check-locale-sync.sh
+
+log "Local-state guard"
+bash scripts/check-local-state-guard.sh
 
 if [[ ! -d "$ROOT_DIR/web/node_modules" ]]; then
   log "Install web dependencies"
