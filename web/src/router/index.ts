@@ -21,6 +21,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'users', name: 'Users', component: () => import('@/views/Users.vue') },
       { path: 'routing', name: 'Routing', component: () => import('@/views/Routing.vue') },
       { path: 'dns', name: 'DNS', component: () => import('@/views/DNS.vue') },
+      { path: 'privacy', name: 'PrivacyDiagnostics', component: () => import('@/views/PrivacyDiagnostics.vue') },
       { path: 'monitor', name: 'Monitor', component: () => import('@/views/Monitor.vue') },
       { path: 'settings', name: 'Settings', component: () => import('@/views/Settings.vue') },
       { path: 'config', name: 'Config', component: () => import('@/views/Config.vue') },

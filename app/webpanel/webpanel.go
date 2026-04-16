@@ -232,6 +232,7 @@ func (wp *WebPanel) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/tun/restore-clean", wp.authMiddleware(wp.handleTunRestoreClean))
 	mux.HandleFunc("/api/v1/tun/toggle", wp.authMiddleware(wp.handleTunToggle))
 	mux.HandleFunc("/api/v1/tun/install-privilege", wp.authMiddleware(wp.handleTunInstallPrivilege))
+	mux.HandleFunc("/api/v1/privacy/context", wp.authMiddleware(wp.handlePrivacyDiagnosticsContext))
 
 	// Share link
 	mux.HandleFunc("/api/v1/share/generate", wp.authMiddleware(wp.handleShareGenerate))

@@ -96,6 +96,7 @@ const menuOptions = computed<MenuOption[]>(() => [
   { label: t('nav.nodePool'), key: 'node-pool' },
   { label: t('nav.routing'), key: 'routing' },
   { label: t('nav.dns'), key: 'dns' },
+  { label: t('nav.privacy'), key: 'privacy' },
   { label: t('nav.monitor'), key: 'monitor' },
   { label: t('nav.settings'), key: 'settings' },
   { label: t('nav.config'), key: 'config' },

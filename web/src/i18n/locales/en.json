@@ -44,6 +44,7 @@
     "users": "Users",
     "routing": "Routing",
     "dns": "DNS",
+    "privacy": "Privacy Diagnostics",
     "monitor": "Monitor",
     "settings": "Settings",
     "config": "Config",
@@ -590,15 +591,7 @@
     "destinationBindingsNoActiveNodes": "There are no active nodes to bind right now. Promote or validate nodes into the active pool first.",
     "destinationBindingAdd": "Add Binding",
     "destinationBindingPreset": "Destination Type",
-    "destinationBindingSelectionMode": "Selection Mode",
-    "destinationBindingSelectionModeOptions": {
-      "primary_only": "Primary only",
-      "failover_ordered": "Ordered failover",
-      "failover_fastest": "Fastest failover"
-    },
-    "destinationBindingNode": "Primary Node",
-    "destinationBindingFallbackNodes": "Fallback Nodes",
-    "destinationBindingFallbackNodesPlaceholder": "Choose fallback nodes in priority order",
+    "destinationBindingNode": "Target Node",
     "destinationBindingDomains": "Custom Domains",
     "destinationBindingDomainsPlaceholder": "One domain rule per line, for example:\ndomain:example.com\nfull:api.example.com\n*.service.example",
     "destinationBindingResolvedDomains": "Applied domains: {domains}",
@@ -660,7 +653,6 @@
     },
     "poolSortOptions": {
       "quality": "Default Quality Order",
-      "cleanliness_desc": "Trusted / Clean First",
       "last_checked_desc": "Newest probe first",
       "last_checked_asc": "Oldest probe first",
       "fail_rate_asc": "Fail rate low to high",
@@ -690,7 +682,6 @@
     "networkType": {
       "unknown": "Network Unknown",
       "residential_likely": "Residential Likely",
-      "isp_likely": "ISP Likely",
       "datacenter_likely": "Datacenter Likely"
     },
     "confidence": {
@@ -708,8 +699,7 @@
       "exit_ip_unavailable": "No usable exit IP is available",
       "lookup_failed": "Exit-IP intelligence lookup failed",
       "hosting_keyword_match": "Matched a hosting or cloud-provider signal",
-      "isp_keyword_match": "Matched an ISP or carrier-network signal",
-      "residential_keyword_match": "Matched a residential broadband signal",
+      "residential_keyword_match": "Matched an access-ISP or residential signal",
       "probe_failure_rate_high": "Probe failure rate is too high",
       "residential_stable_exit": "Residential-like exit with stable probe history",
       "datacenter_exit_network": "Exit looks more like a datacenter network",
@@ -755,5 +745,40 @@
       "poolWarningTitle": "The active pool is not stable enough yet",
       "degradedTitle": "The machine is degraded and needs attention"
     }
+  },
+  "privacy": {
+    "title": "Privacy Diagnostics",
+    "subtitle": "Run first-phase DNS and WebRTC leak checks from the browser while correlating the results with current TUN runtime context.",
+    "firstPhaseTitle": "First-phase privacy checks",
+    "firstPhaseBody": "This page focuses on DNS and WebRTC leakage first. IP geolocation, VPN heuristics, and browser fingerprint checks can be added later without mixing all privacy checks into one unreadable page.",
+    "unsupported": "Privacy diagnostics are not available because the local TUN/runtime context is unavailable.",
+    "runtimeContextTitle": "Runtime Context",
+    "tunRunning": "Transparent mode running",
+    "routeMode": "Route mode",
+    "remoteDns": "Remote DNS resolvers",
+    "directEgress": "Direct egress IP",
+    "proxyEgress": "Proxy egress IP",
+    "dnsTitle": "DNS Leak Check",
+    "runDnsCheck": "Run DNS Check",
+    "dnsUnknownTitle": "DNS status not checked yet",
+    "dnsLowRiskTitle": "No obvious DNS leak signal",
+    "dnsWarningTitle": "DNS leak risk needs attention",
+    "dnsSummaryIdle": "Run the DNS check to compare current runtime context with browser-side behavior.",
+    "dnsTunRunning": "Transparent mode is currently running.",
+    "dnsTunStopped": "Transparent mode is currently stopped.",
+    "dnsExpectedResolvers": "Configured remote DNS resolvers: {resolvers}",
+    "dnsAutoTestedHint": "Auto-tested mode may still keep some destinations direct if direct probing succeeded.",
+    "dnsStrictProxyHint": "Strict proxy mode is expected to keep DNS and traffic on the proxy-oriented path.",
+    "webrtcTitle": "WebRTC Leak Check",
+    "runWebRtcCheck": "Run WebRTC Check",
+    "webrtcUnsupported": "This browser does not expose WebRTC candidate gathering APIs.",
+    "webrtcUnknownTitle": "WebRTC status not checked yet",
+    "webrtcLowRiskTitle": "No obvious WebRTC leak signal",
+    "webrtcWarningTitle": "WebRTC leak risk needs attention",
+    "webrtcSummaryIdle": "Run the WebRTC check to gather ICE candidates and inspect what address information the browser exposes.",
+    "webrtcCandidateCount": "Gathered {count} ICE candidate(s)",
+    "webrtcPrivateExposed": "Private/local address candidates were exposed",
+    "webrtcPublicExposed": "Public reflexive address candidates were exposed",
+    "webrtcNoExposure": "No private or public leak-prone candidates were observed"
   }
 }

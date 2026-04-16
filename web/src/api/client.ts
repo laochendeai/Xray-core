@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type {
   NodePoolDashboardResponse,
+  PrivacyDiagnosticsContextResponse,
   ReadinessResponse,
   SubscriptionCreateRequest,
   SubscriptionUpdateRequest,
@@ -123,6 +124,10 @@ export const tunAPI = {
   toggle: () => apiClient.post('/tun/toggle') as Promise<TunStatusResponse>,
   installPrivilege: () =>
     apiClient.post('/tun/install-privilege', undefined, { timeout: 120000 }) as Promise<TunStatusResponse>
+}
+
+export const privacyAPI = {
+  getContext: () => apiClient.get('/privacy/context') as Promise<PrivacyDiagnosticsContextResponse>
 }
 
 export const shareAPI = {
