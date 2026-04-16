@@ -219,13 +219,18 @@ The upstream [README](https://github.com/XTLS/Xray-core#readme) is open, so feel
 
 ## Contributing
 
-[Code of Conduct](https://github.com/XTLS/Xray-core/blob/main/CODE_OF_CONDUCT.md)
+- [Contributing Guide](CONTRIBUTING.md)
+- [Code Owners](.github/CODEOWNERS)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security Policy](SECURITY.md)
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/XTLS/Xray-core)
 
 ### Change Workflow
 
 This repository uses a hard-gated change workflow for local work and PRs.
+
+Project-specific agent rules now live in [`CLAUDE.md`](CLAUDE.md). Use that file as the canonical working rule layer for planning, regression checks, risky actions, worktree isolation, and repo closeout.
 
 1. Open an issue. Use [`.github/ISSUE_TEMPLATE/change-request.md`](.github/ISSUE_TEMPLATE/change-request.md) for planned changes.
 2. Create a branch for that issue.
