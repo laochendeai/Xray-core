@@ -185,3 +185,75 @@ func TestClassifyNodeIntelligenceMarksHighFailRateSuspicious(t *testing.T) {
 		t.Fatalf("expected unknown network type on lookup failure, got %q", result.NetworkType)
 	}
 }
+
+func TestClassifyNodeIntelligenceMarksExitIPUnavailable(t *testing.T) {
+	t.Parallel()
+
+	result := classifyNodeIntelligence(
+		NodeRecord{ExitIPStatus: NodeExitIPStatusUnknown},
+		defaultValidationConfig(),
+		nodeIPConnectionLookupResult{CheckedAt: time.Now().UTC()},
+	)
+
+	if result.NetworkReason != nodeIntelligenceReasonExitIPUnavailable {
+		t.Fatalf("expected exit_ip_unavailable network reason, got %q", result.NetworkReason)
+	}
+	if result.CleanlinessReason != nodeIntelligenceReasonExitIPUnavailable {
+		t.Fatalf("expected exit_ip_unavailable cleanliness reason, got %q", result.CleanlinessReason)
+	}
+}
+
+func TestClassifyNodeIntelligenceMarksLookupFailureUnknown(t *testing.T) {
+	t.Parallel()
+
+	result := classifyNodeIntelligence(
+		NodeRecord{ExitIPStatus: NodeExitIPStatusAvailable, ExitIP: "198.51.100.20"},
+		defaultValidationConfig(),
+		nodeIPConnectionLookupResult{CheckedAt: time.Now().UTC(), Error: "lookup timeout"},
+	)
+
+	if result.NetworkReason != nodeIntelligenceReasonLookupFailed {
+		t.Fatalf("expected lookup_failed network reason, got %q", result.NetworkReason)
+	}
+	if result.CleanlinessReason != nodeIntelligenceReasonLookupFailed {
+		t.Fatalf("expected lookup_failed cleanliness reason, got %q", result.CleanlinessReason)
+	}
+}
+
+func TestClassifyNodeIntelligenceRecognizesGreenhostAsDatacenter(t *testing.T) {
+	t.Parallel()
+
+	result := classifyNodeIntelligence(
+		NodeRecord{ExitIPStatus: NodeExitIPStatusAvailable, ExitIP: "193.29.139.197"},
+		defaultValidationConfig(),
+		nodeIPConnectionLookupResult{
+			Org:       "Greenhost BV",
+			ISP:       "Greenhost BV",
+			Domain:    "greenhost.nl",
+			CheckedAt: time.Now().UTC(),
+		},
+	)
+
+	if result.NetworkType != NodeNetworkTypeDatacenterLikely {
+		t.Fatalf("expected datacenter-likely network type, got %q", result.NetworkType)
+	}
+}
+
+func TestClassifyNodeIntelligenceRecognizesMicrosoftAsDatacenter(t *testing.T) {
+	t.Parallel()
+
+	result := classifyNodeIntelligence(
+		NodeRecord{ExitIPStatus: NodeExitIPStatusAvailable, ExitIP: "4.222.217.240"},
+		defaultValidationConfig(),
+		nodeIPConnectionLookupResult{
+			Org:       "Microsoft Corporation",
+			ISP:       "Microsoft Corporation",
+			Domain:    "microsoft.com",
+			CheckedAt: time.Now().UTC(),
+		},
+	)
+
+	if result.NetworkType != NodeNetworkTypeDatacenterLikely {
+		t.Fatalf("expected datacenter-likely network type, got %q", result.NetworkType)
+	}
+}
