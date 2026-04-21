@@ -1,6 +1,8 @@
 import axios from 'axios'
 import type {
   NodePoolDashboardResponse,
+  PrivacyHardeningActionResponse,
+  PrivacyHardeningStatusResponse,
   PrivacyDiagnosticsContextResponse,
   ReadinessResponse,
   SubscriptionCreateRequest,
@@ -127,7 +129,13 @@ export const tunAPI = {
 }
 
 export const privacyAPI = {
-  getContext: () => apiClient.get('/privacy/context') as Promise<PrivacyDiagnosticsContextResponse>
+  getContext: () => apiClient.get('/privacy/context') as Promise<PrivacyDiagnosticsContextResponse>,
+  getHardeningStatus: () =>
+    apiClient.get('/privacy/hardening/status') as Promise<PrivacyHardeningStatusResponse>,
+  installBrowserPolicy: () =>
+    apiClient.post('/privacy/hardening/browser-policy', undefined, { timeout: 300000 }) as Promise<PrivacyHardeningActionResponse>,
+  openControlledBrowser: () =>
+    apiClient.post('/privacy/hardening/controlled-browser') as Promise<PrivacyHardeningActionResponse>
 }
 
 export const shareAPI = {

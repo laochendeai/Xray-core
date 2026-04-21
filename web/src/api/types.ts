@@ -551,6 +551,77 @@ export interface PrivacyDiagnosticsContextResponse {
   tunSettings?: TunEditableSettings;
 }
 
+export interface PrivacyFingerprintHardening {
+  canHardenDailyBrowser: boolean;
+  requiresControlledBrowser: boolean;
+  reason: string;
+  controlledBrowserActionName: string;
+}
+
+export interface PrivacyBrowserPolicyPathStatus {
+  path: string;
+  exists: boolean;
+  matching: boolean;
+  error?: string;
+}
+
+export interface PrivacyBrowserPolicyTargetStatus {
+  browser: string;
+  detected: boolean;
+  configured: boolean;
+  paths: PrivacyBrowserPolicyPathStatus[];
+}
+
+export interface PrivacyBrowserPolicyStatus {
+  supported: boolean;
+  installed: boolean;
+  configured: boolean;
+  installable: boolean;
+  canInstall: boolean;
+  restartRequired: boolean;
+  unsupportedReason?: string;
+  installUnavailable?: string;
+  policyFileName: string;
+  installCommand: string;
+  removeCommand: string;
+  expected: Record<string, string>;
+  detectedBrowsers: number;
+  configuredBrowsers: number;
+  configuredPolicyFiles: number;
+  targets: PrivacyBrowserPolicyTargetStatus[];
+}
+
+export interface PrivacyControlledBrowserStatus {
+  supported: boolean;
+  available: boolean;
+  nodeAvailable: boolean;
+  playwrightAvailable: boolean;
+  displayAvailable: boolean;
+  requiresVisibleSession: boolean;
+  unsupportedReason?: string;
+  scriptPath?: string;
+  command: string;
+  outputDir: string;
+  logFile: string;
+}
+
+export interface PrivacyHardeningStatusResponse {
+  platform: string;
+  browserPolicy: PrivacyBrowserPolicyStatus;
+  controlledBrowser: PrivacyControlledBrowserStatus;
+  dailyBrowserFingerprint: PrivacyFingerprintHardening;
+  currentPageCanHardenSystem: boolean;
+}
+
+export interface PrivacyHardeningActionResponse {
+  ok: boolean;
+  message: string;
+  output?: string;
+  pid?: number;
+  logFile?: string;
+  status?: PrivacyHardeningStatusResponse;
+}
+
 export interface PrivacyWebRTCCandidate {
   candidate: string;
   type: string;

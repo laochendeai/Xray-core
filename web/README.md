@@ -160,9 +160,10 @@ make build-dev
 
 - 对照浏览器侧证据与当前 TUN、DNS、节点池状态，检查 IP 定位、WebRTC、DNS、指纹、IP 纯净度和节点池去重
 - 页面本身负责检测和解释；网络层防护依赖严格透明 TUN，全隧道模式会接管非旁路 IPv4、启用期间禁用 IPv6，并把远端 DNS 规范化为 DoH 加密解析
-- 日常 Chrome/Chromium-family 浏览器需要先安装托管策略：`sudo ./scripts/install-browser-privacy-policy.sh`，再完全重启浏览器并在 `chrome://policy` 检查策略生效
-- IPPure 验收以仓库脚本为准：在仓库根目录运行 `node scripts/verify-ippure.mjs`
-- 该脚本默认从 `IPPURE_CONFIG`、当前仓库配置或正在运行的 `xray run -c ...` 配置中发现本地 SOCKS 入站，并启用加固浏览器策略、关闭 WebRTC API、随机化指纹 profile；需要可见浏览器时运行 `IPPURE_HEADLESS=0 IPPURE_KEEP_OPEN=1 node scripts/verify-ippure.mjs`
+- 页面顶部的“一键隐私加固中心”会先检测本机平台、浏览器策略状态和受控浏览器可用性；支持时可直接点击“安装/修复浏览器策略”和“打开受控 IPPure 浏览器”
+- Linux 上浏览器策略按钮会安装 Chromium-family 托管策略 `WebRtcIPHandling=disable_non_proxied_udp` 与 `DnsOverHttpsMode=off`；安装后仍必须完全重启浏览器并在 `chrome://policy` 或 `edge://policy` 检查生效
+- 受控 IPPure 浏览器按钮会启动 `scripts/verify-ippure.mjs` 的可见 profile，自动随机化指纹、关闭 WebRTC API、阻断非代理 UDP，并把证据写入 `runtime/ippure-webpanel`
+- 命令行仍可作为回退路径：`sudo ./scripts/install-browser-privacy-policy.sh`，以及 `IPPURE_HEADLESS=0 IPPURE_KEEP_OPEN=1 node scripts/verify-ippure.mjs`
 - 普通浏览器在透明 TUN 开启后不应暴露直连 IPv4、IPv6、DNS 或 WebRTC/STUN 网络路径；若仍暴露直连 IP，应按 TUN/helper 回归处理。浏览器指纹唯一性仍属于浏览器配置或 profile 策略问题
 
 ### 实时监控 (`/monitor`)

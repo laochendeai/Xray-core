@@ -8,9 +8,69 @@
     <n-alert type="info" :title="t('privacy.ippureGateTitle')">
       {{ t("privacy.ippureGateBody") }}
     </n-alert>
-    <n-alert type="warning" :title="t('privacy.hardenedPathTitle')">
-      {{ t("privacy.hardenedPathBody") }}
-    </n-alert>
+
+    <n-card size="small" :title="t('privacy.hardeningCenterTitle')">
+      <n-space vertical :size="12">
+        <n-alert type="info" :title="t('privacy.hardeningCenterIntroTitle')">
+          {{ t("privacy.hardeningCenterIntroBody") }}
+        </n-alert>
+        <n-alert v-if="hardeningError" type="error">
+          {{ hardeningError }}
+        </n-alert>
+        <n-alert v-if="hardeningActionMessage" :type="hardeningActionType">
+          {{ hardeningActionMessage }}
+        </n-alert>
+        <n-descriptions bordered :column="1" size="small">
+          <n-descriptions-item :label="t('privacy.hardeningPlatform')">
+            {{ hardening?.platform || "-" }}
+          </n-descriptions-item>
+          <n-descriptions-item :label="t('privacy.browserPolicyStatus')">
+            {{ browserPolicySummary }}
+          </n-descriptions-item>
+          <n-descriptions-item :label="t('privacy.controlledBrowserStatus')">
+            {{ controlledBrowserSummary }}
+          </n-descriptions-item>
+          <n-descriptions-item :label="t('privacy.dailyBrowserFingerprintStatus')">
+            {{ dailyBrowserFingerprintSummary }}
+          </n-descriptions-item>
+        </n-descriptions>
+        <n-space>
+          <n-button :loading="loadingHardening" @click="loadHardeningStatus">
+            {{ t("privacy.refreshHardeningStatus") }}
+          </n-button>
+          <n-button
+            type="primary"
+            :loading="installingBrowserPolicy"
+            :disabled="!hardening?.browserPolicy.canInstall"
+            @click="installBrowserPolicy"
+          >
+            {{ t("privacy.installBrowserPolicy") }}
+          </n-button>
+          <n-button
+            type="primary"
+            secondary
+            :loading="openingControlledBrowser"
+            :disabled="!hardening?.controlledBrowser.available"
+            @click="openControlledBrowser"
+          >
+            {{ t("privacy.openControlledBrowser") }}
+          </n-button>
+        </n-space>
+        <n-alert v-if="browserPolicyHint" type="warning" :title="t('privacy.browserPolicyHintTitle')">
+          {{ browserPolicyHint }}
+        </n-alert>
+        <n-alert v-if="controlledBrowserHint" type="warning" :title="t('privacy.controlledBrowserHintTitle')">
+          {{ controlledBrowserHint }}
+        </n-alert>
+        <n-list v-if="hardening?.browserPolicy.targets.length" bordered>
+          <n-list-item v-for="target in hardening.browserPolicy.targets" :key="target.browser">
+            {{ target.browser }} ·
+            {{ target.detected ? t("privacy.browserDetected") : t("privacy.browserNotDetected") }} ·
+            {{ target.configured ? t("privacy.policyConfigured") : t("privacy.policyMissing") }}
+          </n-list-item>
+        </n-list>
+      </n-space>
+    </n-card>
 
     <n-space>
       <n-button type="primary" :loading="runningAll" @click="runAllChecks">
@@ -156,7 +216,7 @@
             <div class="card-header">
               <span>{{ t("privacy.fingerprintTitle") }}</span>
               <n-tag :type="riskTagType(fingerprintRisk.leakRisk)">
-                {{ riskLabel(fingerprintRisk.leakRisk) }}
+                {{ fingerprintRiskLabel(fingerprintRisk.leakRisk) }}
               </n-tag>
             </div>
           </template>
@@ -278,6 +338,7 @@ import type {
   PrivacyDiagnosticsContextResponse,
   PrivacyDnsResult,
   PrivacyFingerprintSnapshot,
+  PrivacyHardeningStatusResponse,
   PrivacyWebRTCCandidate,
   PrivacyWebRTCResult,
   TunRoutingDiagnostic,
@@ -297,8 +358,15 @@ const { t } = useI18n();
 const message = useMessage();
 
 const context = ref<PrivacyDiagnosticsContextResponse | null>(null);
+const hardening = ref<PrivacyHardeningStatusResponse | null>(null);
 const loadError = ref("");
+const hardeningError = ref("");
+const hardeningActionMessage = ref("");
+const hardeningActionType = ref<"success" | "info" | "warning" | "error">("info");
 const loadingContext = ref(false);
+const loadingHardening = ref(false);
+const installingBrowserPolicy = ref(false);
+const openingControlledBrowser = ref(false);
 const runningAll = ref(false);
 const runningIp = ref(false);
 const runningWebRTC = ref(false);
@@ -341,8 +409,60 @@ async function loadNodePool() {
   }
 }
 
+async function loadHardeningStatus() {
+  hardeningError.value = "";
+  loadingHardening.value = true;
+  try {
+    hardening.value = await privacyAPI.getHardeningStatus();
+  } catch (err: any) {
+    hardeningError.value = err?.error || err?.message || t("common.error");
+  } finally {
+    loadingHardening.value = false;
+  }
+}
+
+async function installBrowserPolicy() {
+  hardeningActionMessage.value = "";
+  installingBrowserPolicy.value = true;
+  try {
+    const response = await privacyAPI.installBrowserPolicy();
+    if (response.status) hardening.value = response.status;
+    hardeningActionType.value = response.ok ? "success" : "warning";
+    hardeningActionMessage.value = response.message;
+    message.success(response.message);
+  } catch (err: any) {
+    hardeningActionType.value = "error";
+    hardeningActionMessage.value = err?.error || err?.message || t("common.error");
+    message.error(hardeningActionMessage.value);
+    await loadHardeningStatus();
+  } finally {
+    installingBrowserPolicy.value = false;
+  }
+}
+
+async function openControlledBrowser() {
+  hardeningActionMessage.value = "";
+  openingControlledBrowser.value = true;
+  try {
+    const response = await privacyAPI.openControlledBrowser();
+    if (response.status) hardening.value = response.status;
+    hardeningActionType.value = response.ok ? "success" : "warning";
+    hardeningActionMessage.value = response.pid
+      ? t("privacy.controlledBrowserStarted", { pid: response.pid, log: response.logFile || "-" })
+      : response.message;
+    message.success(hardeningActionMessage.value);
+  } catch (err: any) {
+    hardeningActionType.value = "error";
+    hardeningActionMessage.value = err?.error || err?.message || t("common.error");
+    message.error(hardeningActionMessage.value);
+    await loadHardeningStatus();
+  } finally {
+    openingControlledBrowser.value = false;
+  }
+}
+
 async function loadAllContext() {
-  await Promise.all([loadContext(), loadNodePool()]);
+  await Promise.all([loadContext(), loadNodePool(), loadHardeningStatus()]);
 }
 
 async function fetchJsonWithTimeout(url: string, timeoutMs: number) {
@@ -475,6 +595,60 @@ const activeIntelligenceCheckedCount = computed(
   () => activeNodes.value.filter((node) => !!node.intelligenceCheckedAt).length,
 );
 
+const browserPolicySummary = computed(() => {
+  const policy = hardening.value?.browserPolicy;
+  if (!policy) return t("privacy.hardeningStatusUnknown");
+  if (!policy.supported) return policy.unsupportedReason || t("privacy.browserPolicyUnsupported");
+  if (policy.installed) {
+    if (policy.detectedBrowsers === 0) {
+      return t("privacy.browserPolicyConfiguredNoDetectedSummary");
+    }
+    return t("privacy.browserPolicyInstalledSummary", {
+      configured: policy.configuredBrowsers,
+      detected: policy.detectedBrowsers,
+    });
+  }
+  if (policy.configured) {
+    return t("privacy.browserPolicyPartialSummary", {
+      configured: policy.configuredBrowsers,
+      detected: policy.detectedBrowsers,
+    });
+  }
+  return t("privacy.browserPolicyMissingSummary");
+});
+
+const browserPolicyHint = computed(() => {
+  const policy = hardening.value?.browserPolicy;
+  if (!policy) return "";
+  if (!policy.supported) return policy.unsupportedReason || t("privacy.browserPolicyUnsupported");
+  if (!policy.canInstall) return policy.installUnavailable || t("privacy.browserPolicyInstallUnavailable");
+  if (policy.restartRequired) return t("privacy.browserPolicyRestartRequired");
+  return "";
+});
+
+const controlledBrowserSummary = computed(() => {
+  const controlled = hardening.value?.controlledBrowser;
+  if (!controlled) return t("privacy.hardeningStatusUnknown");
+  if (controlled.available) {
+    return t("privacy.controlledBrowserAvailableSummary", {
+      output: controlled.outputDir,
+    });
+  }
+  return controlled.unsupportedReason || t("privacy.controlledBrowserUnavailableSummary");
+});
+
+const controlledBrowserHint = computed(() => {
+  const controlled = hardening.value?.controlledBrowser;
+  if (!controlled || controlled.available) return "";
+  return controlled.unsupportedReason || t("privacy.controlledBrowserUnavailableSummary");
+});
+
+const dailyBrowserFingerprintSummary = computed(() => {
+  const hardeningInfo = hardening.value?.dailyBrowserFingerprint;
+  if (!hardeningInfo) return t("privacy.hardeningStatusUnknown");
+  return hardeningInfo.reason || t("privacy.dailyBrowserFingerprintBoundary");
+});
+
 const dnsResult = computed<PrivacyDnsResult>(() => ({
   leakRisk: runtimeDnsRisk.value.leakRisk,
   expectedRemoteDns: context.value?.tunSettings?.remoteDns || context.value?.tunStatus?.remoteDns || [],
@@ -597,9 +771,13 @@ const fingerprintAlertTitle = computed(() =>
 
 const fingerprintSummary = computed(() => {
   if (!fingerprintSnapshot.value) return t("privacy.fingerprintSummaryIdle");
-  return t("privacy.fingerprintSummary", {
+  const summary = t("privacy.fingerprintSummary", {
     count: fingerprintRisk.value.highEntropySurfaceCount,
   });
+  if (fingerprintRisk.value.leakRisk === "high" || fingerprintRisk.value.leakRisk === "warning") {
+    return `${summary} ${t("privacy.fingerprintUseControlledBrowser")}`;
+  }
+  return summary;
 });
 
 const cleanlinessAlertTitle = computed(() =>
@@ -653,6 +831,10 @@ function riskAlertType(risk: PrivacyRiskLevel) {
 
 function riskLabel(risk: PrivacyRiskLevel) {
   return t(`privacy.risk.${risk}`);
+}
+
+function fingerprintRiskLabel(risk: PrivacyRiskLevel) {
+  return t(`privacy.fingerprintRisk.${risk}`);
 }
 
 function routeModeLabel(value: string) {
