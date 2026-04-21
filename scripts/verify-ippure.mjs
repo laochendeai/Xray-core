@@ -4,19 +4,45 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const outputDir = process.env.IPPURE_OUTPUT_DIR || path.join("runtime", "ippure-verification");
-const pages = [
+const allPages = [
   ["home", "https://ippure.com/"],
   ["ip", "https://ippure.com/IP-leak-Detect"],
   ["webrtc", "https://ippure.com/Browser-WebRTC-Leak-Detect"],
   ["dns", "https://ippure.com/DNS-Leak-Detect"],
   ["fingerprint", "https://ippure.com/fingerprint"],
 ];
+const requestedPages = new Set(
+  (process.env.IPPURE_PAGES || "")
+    .split(",")
+    .map((pageName) => pageName.trim())
+    .filter(Boolean),
+);
+const pages = requestedPages.size > 0 ? allPages.filter(([name]) => requestedPages.has(name)) : allPages;
+if (pages.length === 0) {
+  throw new Error(`No IPPure pages matched IPPURE_PAGES=${process.env.IPPURE_PAGES}`);
+}
 
 await mkdir(outputDir, { recursive: true });
 
+const hardenBrowser = process.env.IPPURE_HARDEN_BROWSER !== "0";
+const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox"];
+if (hardenBrowser) {
+  launchArgs.push(
+    "--disable-quic",
+    "--disable-features=EncryptedClientHello,UseDnsHttpsSvcbAlpn",
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+  );
+}
+const navigationTimeoutMs = Number.parseInt(process.env.IPPURE_NAV_TIMEOUT_MS || "60000", 10);
+const networkIdleTimeoutMs = Number.parseInt(process.env.IPPURE_NETWORK_IDLE_TIMEOUT_MS || "10000", 10);
+const settleTimeoutMs = Number.parseInt(process.env.IPPURE_SETTLE_TIMEOUT_MS || "3000", 10);
+const proxyServer = process.env.IPPURE_PROXY_SERVER || "";
+
 const browser = await chromium.launch({
   headless: true,
-  args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  args: launchArgs,
+  proxy: proxyServer ? { server: proxyServer } : undefined,
 });
 
 const results = [];
@@ -33,10 +59,10 @@ try {
     try {
       const response = await page.goto(url, {
         waitUntil: "domcontentloaded",
-        timeout: 60000,
+        timeout: navigationTimeoutMs,
       });
-      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => undefined);
-      await page.waitForTimeout(3000);
+      await page.waitForLoadState("networkidle", { timeout: networkIdleTimeoutMs }).catch(() => undefined);
+      await page.waitForTimeout(settleTimeoutMs);
       result.status = response ? String(response.status()) : "no-response";
       result.title = await page.title();
       const text = await page.locator("body").innerText({ timeout: 10000 }).catch(() => "");
