@@ -2335,6 +2335,10 @@ const destinationBindingPresetOptions = computed(() => [
     value: "gemini" as TunDestinationBindingPreset,
   },
   {
+    label: t("nodePool.destinationBindingPresetOptions.github"),
+    value: "github" as TunDestinationBindingPreset,
+  },
+  {
     label: t("nodePool.destinationBindingPresetOptions.github_copilot"),
     value: "github_copilot" as TunDestinationBindingPreset,
   },

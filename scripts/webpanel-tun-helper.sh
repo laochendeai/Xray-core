@@ -255,24 +255,28 @@ prepare_capture_route_table() {
 
 resolved_link_has_dns_scope() {
   local default_dev="$1"
+  local link_ref
 
   if ! command -v resolvectl >/dev/null 2>&1; then
     return 1
   fi
 
-  resolvectl status "$default_dev" 2>/dev/null | grep -Fq "Current Scopes: DNS"
+  link_ref="$(resolved_link_ref "$default_dev")"
+  resolvectl status "$link_ref" 2>/dev/null | grep -Fq "Current Scopes: DNS"
 }
 
 link_uses_remote_dns_override() {
   local default_dev="$1"
   local status=""
   local dns_server=""
+  local link_ref=""
 
   if [[ -z "$default_dev" ]] || ! command -v resolvectl >/dev/null 2>&1; then
     return 1
   fi
 
-  status="$(resolvectl status "$default_dev" 2>/dev/null || true)"
+  link_ref="$(resolved_link_ref "$default_dev")"
+  status="$(resolvectl status "$link_ref" 2>/dev/null || true)"
   [[ -n "$status" ]] || return 1
 
   if grep -Fq "DNS Domain: ~." <<<"$status"; then
@@ -286,6 +290,29 @@ link_uses_remote_dns_override() {
   return 1
 }
 
+resolved_link_ref() {
+  local default_dev="$1"
+  local ifindex_path="/sys/class/net/${default_dev}/ifindex"
+
+  if [[ -r "$ifindex_path" ]]; then
+    tr -d '[:space:]' <"$ifindex_path"
+    return 0
+  fi
+
+  printf '%s\n' "$default_dev"
+}
+
+resolved_stub_active() {
+  local target=""
+
+  if [[ ! -e /etc/resolv.conf ]]; then
+    return 1
+  fi
+
+  target="$(readlink -f /etc/resolv.conf 2>/dev/null || true)"
+  [[ "$target" == "/run/systemd/resolve/stub-resolv.conf" || "$target" == "/run/systemd/resolve/resolv.conf" ]]
+}
+
 link_has_dns_config() {
   local default_dev="$1"
 
@@ -295,6 +322,10 @@ link_has_dns_config() {
 
   if resolved_link_has_dns_scope "$default_dev"; then
     return 0
+  fi
+
+  if resolved_stub_active; then
+    return 1
   fi
 
   if command -v nmcli >/dev/null 2>&1; then
@@ -330,6 +361,24 @@ wait_for_dns_scope() {
   return 1
 }
 
+republish_nm_dns_to_resolved() {
+  local default_dev="$1"
+  local dns_servers=""
+  local link_ref=""
+
+  if [[ -z "$default_dev" ]] || ! command -v nmcli >/dev/null 2>&1 || ! command -v resolvectl >/dev/null 2>&1; then
+    return 1
+  fi
+
+  dns_servers="$(nmcli -g IP4.DNS device show "$default_dev" 2>/dev/null | tr '|' ' ' | xargs || true)"
+  [[ -n "$dns_servers" ]] || return 1
+
+  link_ref="$(resolved_link_ref "$default_dev")"
+  resolvectl dns "$link_ref" $dns_servers >/dev/null 2>&1 || return 1
+  resolvectl default-route "$link_ref" yes >/dev/null 2>&1 || true
+  wait_for_dns_scope "$default_dev"
+}
+
 set_nm_unmanaged() {
   local tun_name="$1"
 
@@ -359,9 +408,11 @@ networkmanager_connection_name() {
 restore_dns() {
   local default_dev="$1"
   local connection_name=""
+  local link_ref=""
 
   if command -v resolvectl >/dev/null 2>&1 && [[ -n "$default_dev" ]]; then
-    resolvectl revert "$default_dev" >/dev/null 2>&1 || true
+    link_ref="$(resolved_link_ref "$default_dev")"
+    resolvectl revert "$link_ref" >/dev/null 2>&1 || true
   fi
 
   if [[ -z "$default_dev" ]] || ! command -v nmcli >/dev/null 2>&1; then
@@ -374,10 +425,13 @@ restore_dns() {
   if wait_for_dns_ready "$default_dev"; then
     return 0
   fi
+  if republish_nm_dns_to_resolved "$default_dev"; then
+    return 0
+  fi
 
   if connection_name="$(networkmanager_connection_name "$default_dev")"; then
     nmcli connection up "$connection_name" >/dev/null 2>&1 || true
-    wait_for_dns_ready "$default_dev" || true
+    wait_for_dns_ready "$default_dev" || republish_nm_dns_to_resolved "$default_dev" || true
   fi
 }
 

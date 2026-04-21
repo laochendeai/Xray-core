@@ -111,6 +111,33 @@ func (c *releaseChecker) Check(ctx context.Context, force bool) UpdateStatusResp
 	}
 }
 
+func (c *releaseChecker) CachedStatus() (UpdateStatusResponse, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cached == nil {
+		return UpdateStatusResponse{
+			CurrentVersion:  core.Version(),
+			Source:          c.source,
+			Status:          "unavailable",
+			Message:         "Release status has not been checked yet. Use Check Updates on the dashboard to refresh it.",
+			UpdateAvailable: false,
+			Stale:           false,
+		}, false
+	}
+
+	cached := *c.cached
+	cached.CurrentVersion = core.Version()
+	if c.now().Sub(c.cachedAt) >= c.cacheTTL {
+		cached.Status = "stale"
+		cached.Stale = true
+		if strings.TrimSpace(cached.Message) == "" {
+			cached.Message = "Cached release info is older than the refresh interval. Use Check Updates on the dashboard to refresh it."
+		}
+	}
+	return cached, true
+}
+
 func (c *releaseChecker) fetch(ctx context.Context) (UpdateStatusResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.feedURL, nil)
 	if err != nil {

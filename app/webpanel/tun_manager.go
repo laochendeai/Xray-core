@@ -82,6 +82,7 @@ const (
 	TunDestinationBindingPresetChatGPT       TunDestinationBindingPreset = "chatgpt"
 	TunDestinationBindingPresetClaude        TunDestinationBindingPreset = "claude"
 	TunDestinationBindingPresetGemini        TunDestinationBindingPreset = "gemini"
+	TunDestinationBindingPresetGitHub        TunDestinationBindingPreset = "github"
 	TunDestinationBindingPresetGitHubCopilot TunDestinationBindingPreset = "github_copilot"
 	TunDestinationBindingPresetOpenRouter    TunDestinationBindingPreset = "openrouter"
 	TunDestinationBindingPresetCursor        TunDestinationBindingPreset = "cursor"
@@ -159,6 +160,13 @@ var tunDestinationBindingPresetDomains = map[TunDestinationBindingPreset][]strin
 		"domain:ai.google.dev",
 		"domain:aistudio.google.com",
 		"full:generativelanguage.googleapis.com",
+	},
+	TunDestinationBindingPresetGitHub: {
+		"full:api.github.com",
+		"domain:github.com",
+		"domain:githubusercontent.com",
+		"domain:githubassets.com",
+		"domain:github.io",
 	},
 	TunDestinationBindingPresetGitHubCopilot: {
 		"full:github.com",
@@ -583,11 +591,11 @@ func (m *TunManager) installPrivilegeLocked(settings *TunFeatureSettings) (strin
 		return "", fmt.Errorf("resolve current xray binary: %w", err)
 	}
 
-	installScriptPath := filepath.Join(filepath.Dir(configPath), "scripts", "install-webpanel-tun-sudoers.sh")
-	if _, err := os.Stat(installScriptPath); err != nil {
+	installScriptPath, err := m.resolveRepoScriptPath("install-webpanel-tun-sudoers.sh")
+	if err != nil {
 		return "", fmt.Errorf("install script is missing: %w", err)
 	}
-	askpassScriptPath := filepath.Join(filepath.Dir(configPath), "scripts", "webpanel-sudo-askpass.sh")
+	askpassScriptPath, _ := m.resolveRepoScriptPath("webpanel-sudo-askpass.sh")
 
 	targetUser := strings.TrimSpace(currentUserName())
 	if targetUser == "" {
@@ -751,6 +759,38 @@ func currentUserName() string {
 	}
 
 	return ""
+}
+
+func (m *TunManager) resolveRepoScriptPath(name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("script name is empty")
+	}
+
+	candidates := make([]string, 0, 2)
+	if xrayBin := strings.TrimSpace(m.xrayBin); xrayBin != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(xrayBin), "scripts", name))
+	}
+	if configPath := strings.TrimSpace(m.configPath); configPath != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(configPath), "scripts", name))
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	checked := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		checked = append(checked, candidate)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		} else if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+
+	return "", fmt.Errorf("%s not found in %s", name, strings.Join(checked, ", "))
 }
 
 func (m *TunManager) loadSettings() (*TunFeatureSettings, error) {
@@ -1011,9 +1051,10 @@ func (m *TunManager) inspectLocked(settings *TunFeatureSettings, includeEgressPr
 		status.ElevationReady = true
 	}
 
-	repoHelperPath := filepath.Join(filepath.Dir(m.configPath), "scripts", "webpanel-tun-helper.sh")
-	helperCurrent, helperCompareErr := filesMatch(settings.HelperPath, repoHelperPath)
-	if helperCompareErr == nil {
+	repoHelperPath, repoHelperPathErr := m.resolveRepoScriptPath("webpanel-tun-helper.sh")
+	if repoHelperPathErr != nil {
+		status.Diagnostics = append(status.Diagnostics, "Unable to locate the repo helper for comparison: "+repoHelperPathErr.Error())
+	} else if helperCurrent, helperCompareErr := filesMatch(settings.HelperPath, repoHelperPath); helperCompareErr == nil {
 		status.HelperCurrent = helperCurrent
 	} else if !os.IsNotExist(helperCompareErr) {
 		status.Diagnostics = append(status.Diagnostics, "Unable to compare the installed helper with the repo helper: "+helperCompareErr.Error())
@@ -1989,6 +2030,8 @@ func normalizeTunDestinationBindingPreset(value string) TunDestinationBindingPre
 		return TunDestinationBindingPresetClaude
 	case TunDestinationBindingPresetGemini:
 		return TunDestinationBindingPresetGemini
+	case TunDestinationBindingPresetGitHub:
+		return TunDestinationBindingPresetGitHub
 	case TunDestinationBindingPresetGitHubCopilot:
 		return TunDestinationBindingPresetGitHubCopilot
 	case TunDestinationBindingPresetOpenRouter:
@@ -3041,17 +3084,59 @@ func checkSudoReady(settings *TunFeatureSettings) bool {
 		return false
 	}
 
-	listing := string(output)
+	return sudoListingAllowsTunActionsWithoutPassword(settings, string(output))
+}
+
+func sudoListingAllowsTunActionsWithoutPassword(settings *TunFeatureSettings, listing string) bool {
 	if settings == nil {
-		return strings.Contains(listing, "NOPASSWD")
+		return strings.Contains(listing, "NOPASSWD:")
+	}
+	if settings.HelperPath == "" || settings.BinaryPath == "" || settings.RuntimeConfigPath == "" || settings.StateDir == "" {
+		return false
 	}
 
-	if settings.HelperPath != "" && strings.Contains(listing, settings.HelperPath) {
-		return true
+	interfaceName := strings.TrimSpace(settings.InterfaceName)
+	if interfaceName == "" {
+		interfaceName = "xray0"
+	}
+	remoteDNS := settings.RemoteDNS
+	if len(remoteDNS) == 0 {
+		remoteDNS = defaultTunDNS
 	}
 
-	if settings.BinaryPath != "" && strings.Contains(listing, settings.BinaryPath) {
-		return true
+	required := make([]string, 0, 2)
+	for _, action := range []string{"start", "stop"} {
+		args := []string{settings.HelperPath, action, settings.BinaryPath, settings.RuntimeConfigPath, settings.StateDir, interfaceName}
+		args = append(args, remoteDNS...)
+		required = append(required, strings.Join(args, " "))
+	}
+
+	for _, command := range required {
+		if !sudoListingHasNoPasswordCommand(listing, command) {
+			return false
+		}
+	}
+	return true
+}
+
+func sudoListingHasNoPasswordCommand(listing, expectedCommand string) bool {
+	expectedCommand = strings.TrimSpace(expectedCommand)
+	if expectedCommand == "" {
+		return false
+	}
+
+	for _, line := range strings.Split(listing, "\n") {
+		for _, section := range strings.Split(line, "NOPASSWD:")[1:] {
+			if passwdIndex := strings.Index(section, "PASSWD:"); passwdIndex >= 0 {
+				section = section[:passwdIndex]
+			}
+			for _, command := range strings.Split(section, ",") {
+				command = strings.TrimSpace(command)
+				if command == "ALL" || command == expectedCommand {
+					return true
+				}
+			}
+		}
 	}
 
 	return false

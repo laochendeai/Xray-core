@@ -187,6 +187,86 @@ func TestBuildTunRuntimeConfigRequiresActiveNodes(t *testing.T) {
 	}
 }
 
+func TestSudoListingAllowsTunActionsWithoutPasswordRequiresExactArguments(t *testing.T) {
+	t.Parallel()
+
+	settings := &TunFeatureSettings{
+		HelperPath:        "/usr/local/libexec/xray-webpanel-tun-helper",
+		BinaryPath:        "/repo/xray",
+		RuntimeConfigPath: "/repo/runtime/tun/config.json",
+		StateDir:          "/repo/runtime/tun",
+		InterfaceName:     "xray0",
+		RemoteDNS:         []string{"1.1.1.1", "8.8.8.8", "9.9.9.9"},
+	}
+
+	listing := `User leo may run the following commands:
+    (ALL : ALL) ALL
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper start /repo/xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 1.1.1.1 8.8.8.8 9.9.9.9
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper stop /repo/xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 1.1.1.1 8.8.8.8 9.9.9.9`
+
+	if !sudoListingAllowsTunActionsWithoutPassword(settings, listing) {
+		t.Fatal("expected exact start and stop sudoers entries to be ready")
+	}
+}
+
+func TestSudoListingAllowsTunActionsWithoutPasswordRejectsStaleBinaryPath(t *testing.T) {
+	t.Parallel()
+
+	settings := &TunFeatureSettings{
+		HelperPath:        "/usr/local/libexec/xray-webpanel-tun-helper",
+		BinaryPath:        "/repo/xray",
+		RuntimeConfigPath: "/repo/runtime/tun/config.json",
+		StateDir:          "/repo/runtime/tun",
+		InterfaceName:     "xray0",
+		RemoteDNS:         []string{"1.1.1.1", "8.8.8.8"},
+	}
+
+	listing := `User leo may run the following commands:
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper start /usr/local/bin/xray-webpanel-xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 1.1.1.1 8.8.8.8
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper stop /usr/local/bin/xray-webpanel-xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 1.1.1.1 8.8.8.8`
+
+	if sudoListingAllowsTunActionsWithoutPassword(settings, listing) {
+		t.Fatal("expected stale exact-argument sudoers entries to be rejected")
+	}
+}
+
+func TestTunManagerResolveRepoScriptPathPrefersRunningBinaryDirectory(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	runningRepo := filepath.Join(tempDir, "current")
+	configRepo := filepath.Join(tempDir, "config")
+	for _, dir := range []string{
+		filepath.Join(runningRepo, "scripts"),
+		filepath.Join(configRepo, "scripts"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	currentHelper := filepath.Join(runningRepo, "scripts", "webpanel-tun-helper.sh")
+	if err := os.WriteFile(currentHelper, []byte("current"), 0o755); err != nil {
+		t.Fatalf("write current helper: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configRepo, "scripts", "webpanel-tun-helper.sh"), []byte("stale"), 0o755); err != nil {
+		t.Fatalf("write stale helper: %v", err)
+	}
+
+	manager := &TunManager{
+		xrayBin:    filepath.Join(runningRepo, "xray"),
+		configPath: filepath.Join(configRepo, "dev-config.current-nodes.json"),
+	}
+
+	resolved, err := manager.resolveRepoScriptPath("webpanel-tun-helper.sh")
+	if err != nil {
+		t.Fatalf("resolve script path: %v", err)
+	}
+	if resolved != currentHelper {
+		t.Fatalf("expected current repo helper %q, got %q", currentHelper, resolved)
+	}
+}
+
 func TestBuildTunRuntimeConfigPlacesTunCatchAllAfterSpecificProxyRules(t *testing.T) {
 	t.Parallel()
 
@@ -212,7 +292,9 @@ func TestBuildTunRuntimeConfigPlacesTunCatchAllAfterSpecificProxyRules(t *testin
 }`)
 
 	uri, err := GenerateShareLink(ShareLinkRequest{Protocol: "vmess", Address: "203.0.113.12", Port: 443, UUID: "11111111-1111-1111-1111-111111111111", Remark: "pool-active", TLS: "tls", SNI: "example.com"})
-	if err != nil { t.Fatalf("generate share link: %v", err) }
+	if err != nil {
+		t.Fatalf("generate share link: %v", err)
+	}
 
 	output, err := buildTunRuntimeConfig(baseConfig, &TunFeatureSettings{InterfaceName: "xray0", MTU: 1500, ProtectCIDRs: []string{"127.0.0.0/8"}, ProtectDomains: []string{"full:localhost"}, DestinationBindings: []TunDestinationBinding{{Preset: string(TunDestinationBindingPresetOpenAI), NodeID: "node-2"}}}, []NodeRecord{{ID: "node-1", URI: mustGenerateTunTestURI(t, "203.0.113.11")}, {ID: "node-2", URI: uri}})
 	if err != nil {
@@ -231,15 +313,31 @@ func TestBuildTunRuntimeConfigPlacesTunCatchAllAfterSpecificProxyRules(t *testin
 	autoFallbackIndex := -1
 	for index, rawRule := range rules {
 		rule, ok := rawRule.(map[string]any)
-		if !ok { continue }
-		if domains, ok := rule["domain"].([]any); ok && len(domains) == 1 && domains[0] == "domain:openai.com" && rule["outboundTag"] == "proxy-01" { openAIProxyIndex = index }
-		if inboundTags, ok := rule["inboundTag"].([]any); ok && len(inboundTags) == 1 && inboundTags[0] == "tun-in" && rule["balancerTag"] == "node-pool-active" { tunCatchAllIndex = index }
-		if rule["balancerTag"] == "auto" { autoFallbackIndex = index }
+		if !ok {
+			continue
+		}
+		if domains, ok := rule["domain"].([]any); ok && len(domains) == 1 && domains[0] == "domain:openai.com" && rule["outboundTag"] == "proxy-01" {
+			openAIProxyIndex = index
+		}
+		if inboundTags, ok := rule["inboundTag"].([]any); ok && len(inboundTags) == 1 && inboundTags[0] == "tun-in" && rule["balancerTag"] == "node-pool-active" {
+			tunCatchAllIndex = index
+		}
+		if rule["balancerTag"] == "auto" {
+			autoFallbackIndex = index
+		}
 	}
-	if openAIProxyIndex == -1 { t.Fatal("expected existing specific proxy rule to be preserved") }
-	if tunCatchAllIndex == -1 { t.Fatal("expected tun catch-all rule to be injected") }
-	if openAIProxyIndex >= tunCatchAllIndex { t.Fatalf("expected specific proxy rule before tun catch-all, got proxy=%d tun=%d", openAIProxyIndex, tunCatchAllIndex) }
-	if autoFallbackIndex != -1 { t.Fatalf("expected generic auto fallback rule to be removed from tun runtime, got index=%d", autoFallbackIndex) }
+	if openAIProxyIndex == -1 {
+		t.Fatal("expected existing specific proxy rule to be preserved")
+	}
+	if tunCatchAllIndex == -1 {
+		t.Fatal("expected tun catch-all rule to be injected")
+	}
+	if openAIProxyIndex >= tunCatchAllIndex {
+		t.Fatalf("expected specific proxy rule before tun catch-all, got proxy=%d tun=%d", openAIProxyIndex, tunCatchAllIndex)
+	}
+	if autoFallbackIndex != -1 {
+		t.Fatalf("expected generic auto fallback rule to be removed from tun runtime, got index=%d", autoFallbackIndex)
+	}
 }
 
 func TestBuildTunRuntimeConfigPlacesDestinationBindingsBeforeTunCatchAll(t *testing.T) {
@@ -261,33 +359,53 @@ func TestBuildTunRuntimeConfigPlacesDestinationBindingsBeforeTunCatchAll(t *test
 }`)
 
 	output, err := buildTunRuntimeConfig(baseConfig, &TunFeatureSettings{InterfaceName: "xray0", MTU: 1500, ProtectCIDRs: []string{"127.0.0.0/8"}, ProtectDomains: []string{"full:localhost"}, DestinationBindings: []TunDestinationBinding{{Preset: string(TunDestinationBindingPresetOpenAI), NodeID: "node-2"}}}, []NodeRecord{{ID: "node-1", URI: mustGenerateTunTestURI(t, "203.0.113.11")}, {ID: "node-2", URI: mustGenerateTunTestURI(t, "203.0.113.12")}})
-	if err != nil { t.Fatalf("build tun runtime config: %v", err) }
+	if err != nil {
+		t.Fatalf("build tun runtime config: %v", err)
+	}
 
 	var rendered map[string]any
-	if err := json.Unmarshal(output, &rendered); err != nil { t.Fatalf("decode rendered config: %v", err) }
+	if err := json.Unmarshal(output, &rendered); err != nil {
+		t.Fatalf("decode rendered config: %v", err)
+	}
 	routing := rendered["routing"].(map[string]any)
 	rules := routing["rules"].([]any)
 	priorityIndex, bindingIndex, catchAllIndex := -1, -1, -1
 	for index, rawRule := range rules {
 		rule, ok := rawRule.(map[string]any)
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		if domains, ok := rule["domain"].([]any); ok {
 			for _, domain := range domains {
 				switch domain {
 				case "domain:priority.example":
 					priorityIndex = index
 				case "domain:openai.com":
-					if rule["outboundTag"] == "pool-active-node-2" { bindingIndex = index }
+					if rule["outboundTag"] == "pool-active-node-2" {
+						bindingIndex = index
+					}
 				}
 			}
 		}
-		if inboundTags, ok := rule["inboundTag"].([]any); ok && len(inboundTags) == 1 && inboundTags[0] == "tun-in" && rule["balancerTag"] == "node-pool-active" { catchAllIndex = index }
+		if inboundTags, ok := rule["inboundTag"].([]any); ok && len(inboundTags) == 1 && inboundTags[0] == "tun-in" && rule["balancerTag"] == "node-pool-active" {
+			catchAllIndex = index
+		}
 	}
-	if priorityIndex == -1 { t.Fatal("expected existing priority rule to be preserved") }
-	if bindingIndex == -1 { t.Fatal("expected destination binding rule to be injected") }
-	if catchAllIndex == -1 { t.Fatal("expected tun catch-all rule to be injected") }
-	if priorityIndex >= bindingIndex { t.Fatalf("expected preserved priority rule before destination binding, got priority=%d binding=%d", priorityIndex, bindingIndex) }
-	if bindingIndex >= catchAllIndex { t.Fatalf("expected destination binding before tun catch-all, got binding=%d catch-all=%d", bindingIndex, catchAllIndex) }
+	if priorityIndex == -1 {
+		t.Fatal("expected existing priority rule to be preserved")
+	}
+	if bindingIndex == -1 {
+		t.Fatal("expected destination binding rule to be injected")
+	}
+	if catchAllIndex == -1 {
+		t.Fatal("expected tun catch-all rule to be injected")
+	}
+	if priorityIndex >= bindingIndex {
+		t.Fatalf("expected preserved priority rule before destination binding, got priority=%d binding=%d", priorityIndex, bindingIndex)
+	}
+	if bindingIndex >= catchAllIndex {
+		t.Fatalf("expected destination binding before tun catch-all, got binding=%d catch-all=%d", bindingIndex, catchAllIndex)
+	}
 }
 
 func TestBuildTunRuntimeConfigSkipsDestinationBindingsForMissingActiveNodes(t *testing.T) {
@@ -303,18 +421,26 @@ func TestBuildTunRuntimeConfigSkipsDestinationBindingsForMissingActiveNodes(t *t
 }`)
 
 	output, err := buildTunRuntimeConfig(baseConfig, &TunFeatureSettings{InterfaceName: "xray0", MTU: 1500, ProtectCIDRs: []string{"127.0.0.0/8"}, ProtectDomains: []string{"full:localhost"}, DestinationBindings: []TunDestinationBinding{{Preset: string(TunDestinationBindingPresetCustom), Domains: []string{"*.example.com"}, NodeID: "missing-node"}}}, []NodeRecord{{ID: "node-1", URI: mustGenerateTunTestURI(t, "203.0.113.21")}})
-	if err != nil { t.Fatalf("build tun runtime config: %v", err) }
+	if err != nil {
+		t.Fatalf("build tun runtime config: %v", err)
+	}
 
 	var rendered map[string]any
-	if err := json.Unmarshal(output, &rendered); err != nil { t.Fatalf("decode rendered config: %v", err) }
+	if err := json.Unmarshal(output, &rendered); err != nil {
+		t.Fatalf("decode rendered config: %v", err)
+	}
 	routing := rendered["routing"].(map[string]any)
 	rules := routing["rules"].([]any)
 	for _, rawRule := range rules {
 		rule, ok := rawRule.(map[string]any)
-		if !ok { continue }
+		if !ok {
+			continue
+		}
 		if domains, ok := rule["domain"].([]any); ok {
 			for _, domain := range domains {
-				if domain == "domain:example.com" { t.Fatalf("expected missing-node destination binding to be skipped, got rule %v", rule) }
+				if domain == "domain:example.com" {
+					t.Fatalf("expected missing-node destination binding to be skipped, got rule %v", rule)
+				}
 			}
 		}
 	}
@@ -353,16 +479,24 @@ func TestBuildTunRuntimeConfigDropsWideBaseDirectRulesButKeepsProtectedLocalEntr
 }`)
 
 	uri, err := GenerateShareLink(ShareLinkRequest{Protocol: "vmess", Address: "203.0.113.21", Port: 443, UUID: "11111111-1111-1111-1111-111111111111", Remark: "pool-active", TLS: "tls", SNI: "example.com"})
-	if err != nil { t.Fatalf("generate share link: %v", err) }
+	if err != nil {
+		t.Fatalf("generate share link: %v", err)
+	}
 
 	output, err := buildTunRuntimeConfig(baseConfig, &TunFeatureSettings{InterfaceName: "xray0", MTU: 1500, ProtectCIDRs: []string{"127.0.0.0/8"}, ProtectDomains: []string{"full:localhost"}}, []NodeRecord{{ID: "node-1", URI: uri}})
-	if err != nil { t.Fatalf("build tun runtime config: %v", err) }
+	if err != nil {
+		t.Fatalf("build tun runtime config: %v", err)
+	}
 
 	var rendered map[string]any
-	if err := json.Unmarshal(output, &rendered); err != nil { t.Fatalf("decode rendered config: %v", err) }
+	if err := json.Unmarshal(output, &rendered); err != nil {
+		t.Fatalf("decode rendered config: %v", err)
+	}
 	routing := rendered["routing"].(map[string]any)
 	rules := routing["rules"].([]any)
-	if len(rules) < 2 { t.Fatalf("expected routing rules, got %v", rules) }
+	if len(rules) < 2 {
+		t.Fatalf("expected routing rules, got %v", rules)
+	}
 }
 
 func TestNormalizeTunDestinationBindingDedupeAndFallbackModes(t *testing.T) {
@@ -389,9 +523,15 @@ func TestSelectTunDestinationBindingNodeHonorsFallbackModes(t *testing.T) {
 	t.Parallel()
 
 	active := map[string]NodeRecord{"primary": {ID: "primary", AvgDelayMs: 50, TotalPings: 10}, "fallback": {ID: "fallback", AvgDelayMs: 20, TotalPings: 10}, "fast-a": {ID: "fast-a", AvgDelayMs: 60, TotalPings: 10}, "fast-b": {ID: "fast-b", AvgDelayMs: 15, TotalPings: 10}}
-	if got := selectTunDestinationBindingNode(TunDestinationBinding{NodeID: "primary", FallbackNodeIDs: []string{"fallback"}, SelectionMode: string(TunDestinationBindingSelectionModePrimaryOnly)}, active); got != "primary" { t.Fatalf("expected primary_only to choose primary, got %q", got) }
-	if got := selectTunDestinationBindingNode(TunDestinationBinding{NodeID: "missing", FallbackNodeIDs: []string{"fallback"}, SelectionMode: string(TunDestinationBindingSelectionModeFailoverOrdered)}, active); got != "fallback" { t.Fatalf("expected ordered failover to choose fallback, got %q", got) }
-	if got := selectTunDestinationBindingNode(TunDestinationBinding{NodeID: "missing", FallbackNodeIDs: []string{"fast-a", "fast-b"}, SelectionMode: string(TunDestinationBindingSelectionModeFailoverFastest)}, active); got != "fast-b" { t.Fatalf("expected fastest failover to choose fastest active candidate, got %q", got) }
+	if got := selectTunDestinationBindingNode(TunDestinationBinding{NodeID: "primary", FallbackNodeIDs: []string{"fallback"}, SelectionMode: string(TunDestinationBindingSelectionModePrimaryOnly)}, active); got != "primary" {
+		t.Fatalf("expected primary_only to choose primary, got %q", got)
+	}
+	if got := selectTunDestinationBindingNode(TunDestinationBinding{NodeID: "missing", FallbackNodeIDs: []string{"fallback"}, SelectionMode: string(TunDestinationBindingSelectionModeFailoverOrdered)}, active); got != "fallback" {
+		t.Fatalf("expected ordered failover to choose fallback, got %q", got)
+	}
+	if got := selectTunDestinationBindingNode(TunDestinationBinding{NodeID: "missing", FallbackNodeIDs: []string{"fast-a", "fast-b"}, SelectionMode: string(TunDestinationBindingSelectionModeFailoverFastest)}, active); got != "fast-b" {
+		t.Fatalf("expected fastest failover to choose fastest active candidate, got %q", got)
+	}
 }
 
 func containsString(values []string, expected string) bool {
@@ -403,7 +543,10 @@ func containsString(values []string, expected string) bool {
 	return false
 }
 
-func TestTunManagerUpdateEditableSettingsPersistsAggregationScaffolding(t *testing.T) { t.Parallel(); configPath := filepath.Join(t.TempDir(), "config.json"); if err := os.WriteFile(configPath, []byte(`{
+func TestTunManagerUpdateEditableSettingsPersistsAggregationScaffolding(t *testing.T) {
+	t.Parallel()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{
   "outbounds": [
     { "tag": "direct", "protocol": "freedom" }
   ],
@@ -411,10 +554,34 @@ func TestTunManagerUpdateEditableSettingsPersistsAggregationScaffolding(t *testi
     "tun": {}
   }
 }
-`), 0o644); err != nil { t.Fatalf("write config: %v", err) }; tunManager, err := NewTunManager(configPath); if err != nil { t.Fatalf("new tun manager: %v", err) }; settings, err := tunManager.UpdateEditableSettings(TunEditableSettings{SelectionPolicy: string(TunSelectionPolicyFastest), RouteMode: string(TunRouteModeStrictProxy), Aggregation: TunAggregationSettings{Enabled: true, Mode: "REDUNDANT_2", MaxPathsPerSession: 12, SchedulerPolicy: "single_best", RelayEndpoint: "  https://relay.example/ingress  ", Health: TunAggregationHealthSettings{MaxSessionLossPct: 9, MaxPathJitterMs: 45, RollbackOnConsecutiveFailures: 7}}}); if err != nil { t.Fatalf("update editable settings: %v", err) }; expected := TunAggregationSettings{Enabled: true, Mode: string(TunAggregationModeRedundant2), MaxPathsPerSession: 8, SchedulerPolicy: string(TunAggregationSchedulerPolicySingleBest), RelayEndpoint: "https://relay.example/ingress", Health: TunAggregationHealthSettings{MaxSessionLossPct: 9, MaxPathJitterMs: 45, RollbackOnConsecutiveFailures: 7}}; if !reflect.DeepEqual(settings.Aggregation, expected) { t.Fatalf("expected normalized aggregation settings %#v, got %#v", expected, settings.Aggregation) }; loaded, err := tunManager.EditableSettings(); if err != nil { t.Fatalf("reload editable settings: %v", err) }; if !reflect.DeepEqual(loaded.Aggregation, expected) { t.Fatalf("expected persisted aggregation settings %#v, got %#v", expected, loaded.Aggregation) }
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	tunManager, err := NewTunManager(configPath)
+	if err != nil {
+		t.Fatalf("new tun manager: %v", err)
+	}
+	settings, err := tunManager.UpdateEditableSettings(TunEditableSettings{SelectionPolicy: string(TunSelectionPolicyFastest), RouteMode: string(TunRouteModeStrictProxy), Aggregation: TunAggregationSettings{Enabled: true, Mode: "REDUNDANT_2", MaxPathsPerSession: 12, SchedulerPolicy: "single_best", RelayEndpoint: "  https://relay.example/ingress  ", Health: TunAggregationHealthSettings{MaxSessionLossPct: 9, MaxPathJitterMs: 45, RollbackOnConsecutiveFailures: 7}}})
+	if err != nil {
+		t.Fatalf("update editable settings: %v", err)
+	}
+	expected := TunAggregationSettings{Enabled: true, Mode: string(TunAggregationModeRedundant2), MaxPathsPerSession: 8, SchedulerPolicy: string(TunAggregationSchedulerPolicySingleBest), RelayEndpoint: "https://relay.example/ingress", Health: TunAggregationHealthSettings{MaxSessionLossPct: 9, MaxPathJitterMs: 45, RollbackOnConsecutiveFailures: 7}}
+	if !reflect.DeepEqual(settings.Aggregation, expected) {
+		t.Fatalf("expected normalized aggregation settings %#v, got %#v", expected, settings.Aggregation)
+	}
+	loaded, err := tunManager.EditableSettings()
+	if err != nil {
+		t.Fatalf("reload editable settings: %v", err)
+	}
+	if !reflect.DeepEqual(loaded.Aggregation, expected) {
+		t.Fatalf("expected persisted aggregation settings %#v, got %#v", expected, loaded.Aggregation)
+	}
 }
 
-func TestTunManagerEditableSettingsNormalizesWildcardProtectDomainsFromConfig(t *testing.T) { t.Parallel(); configPath := filepath.Join(t.TempDir(), "config.json"); if err := os.WriteFile(configPath, []byte(`{
+func TestTunManagerEditableSettingsNormalizesWildcardProtectDomainsFromConfig(t *testing.T) {
+	t.Parallel()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{
   "outbounds": [
     { "tag": "direct", "protocol": "freedom" }
   ],
@@ -424,10 +591,27 @@ func TestTunManagerEditableSettingsNormalizesWildcardProtectDomainsFromConfig(t 
     }
   }
 }
-`), 0o644); err != nil { t.Fatalf("write config: %v", err) }; tunManager, err := NewTunManager(configPath); if err != nil { t.Fatalf("new tun manager: %v", err) }; settings, err := tunManager.EditableSettings(); if err != nil { t.Fatalf("editable settings: %v", err) }; expected := []string{"domain:example.com", "domain:internal.example", "full:exact.example"}; if !reflect.DeepEqual(settings.ProtectDomains, expected) { t.Fatalf("expected normalized protect domains %v, got %v", expected, settings.ProtectDomains) }
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	tunManager, err := NewTunManager(configPath)
+	if err != nil {
+		t.Fatalf("new tun manager: %v", err)
+	}
+	settings, err := tunManager.EditableSettings()
+	if err != nil {
+		t.Fatalf("editable settings: %v", err)
+	}
+	expected := []string{"domain:example.com", "domain:internal.example", "full:exact.example"}
+	if !reflect.DeepEqual(settings.ProtectDomains, expected) {
+		t.Fatalf("expected normalized protect domains %v, got %v", expected, settings.ProtectDomains)
+	}
 }
 
-func TestTunManagerEditableSettingsPersistRemoteDNS(t *testing.T) { t.Parallel(); configPath := filepath.Join(t.TempDir(), "config.json"); if err := os.WriteFile(configPath, []byte(`{
+func TestTunManagerEditableSettingsPersistRemoteDNS(t *testing.T) {
+	t.Parallel()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(configPath, []byte(`{
   "outbounds": [
     { "tag": "direct", "protocol": "freedom" }
   ],
@@ -435,5 +619,25 @@ func TestTunManagerEditableSettingsPersistRemoteDNS(t *testing.T) { t.Parallel()
     "tun": {}
   }
 }
-`), 0o644); err != nil { t.Fatalf("write config: %v", err) }; tunManager, err := NewTunManager(configPath); if err != nil { t.Fatalf("new tun manager: %v", err) }; settings, err := tunManager.UpdateEditableSettings(TunEditableSettings{SelectionPolicy: string(TunSelectionPolicyFastest), RouteMode: string(TunRouteModeStrictProxy), RemoteDNS: []string{"1.1.1.1", "8.8.8.8", "1.1.1.1"}}); if err != nil { t.Fatalf("update editable settings: %v", err) }; if !reflect.DeepEqual(settings.RemoteDNS, []string{"1.1.1.1", "8.8.8.8"}) { t.Fatalf("unexpected remote dns list: %v", settings.RemoteDNS) }; loaded, err := tunManager.EditableSettings(); if err != nil { t.Fatalf("reload editable settings: %v", err) }; if !reflect.DeepEqual(loaded.RemoteDNS, settings.RemoteDNS) { t.Fatalf("expected remote dns to persist, got %v", loaded.RemoteDNS) }
+`), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	tunManager, err := NewTunManager(configPath)
+	if err != nil {
+		t.Fatalf("new tun manager: %v", err)
+	}
+	settings, err := tunManager.UpdateEditableSettings(TunEditableSettings{SelectionPolicy: string(TunSelectionPolicyFastest), RouteMode: string(TunRouteModeStrictProxy), RemoteDNS: []string{"1.1.1.1", "8.8.8.8", "1.1.1.1"}})
+	if err != nil {
+		t.Fatalf("update editable settings: %v", err)
+	}
+	if !reflect.DeepEqual(settings.RemoteDNS, []string{"1.1.1.1", "8.8.8.8"}) {
+		t.Fatalf("unexpected remote dns list: %v", settings.RemoteDNS)
+	}
+	loaded, err := tunManager.EditableSettings()
+	if err != nil {
+		t.Fatalf("reload editable settings: %v", err)
+	}
+	if !reflect.DeepEqual(loaded.RemoteDNS, settings.RemoteDNS) {
+		t.Fatalf("expected remote dns to persist, got %v", loaded.RemoteDNS)
+	}
 }

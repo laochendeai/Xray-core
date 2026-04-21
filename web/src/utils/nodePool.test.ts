@@ -314,6 +314,12 @@ describe("node pool utilities", () => {
     expect(bindingPreviewDomains({ preset: "gemini", domains: [] })).toContain(
       "full:generativelanguage.googleapis.com",
     );
+    expect(bindingPrimaryTestDomain({ preset: "github", domains: [] })).toBe(
+      "api.github.com",
+    );
+    expect(bindingPreviewDomains({ preset: "github", domains: [] })).toContain(
+      "domain:githubusercontent.com",
+    );
     expect(
       bindingPreviewDomains({ preset: "github_copilot", domains: [] }),
     ).toContain("full:copilot.github.com");
