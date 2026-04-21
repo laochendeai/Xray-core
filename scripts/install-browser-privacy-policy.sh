@@ -43,14 +43,25 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 1
 fi
 
-policy_dirs=(
-  "/etc/opt/chrome/policies/managed"
-  "/etc/chromium/policies/managed"
-  "/etc/opt/edge/policies/managed"
-  "/etc/brave/policies/managed"
-  "/etc/opt/brave.com/brave/policies/managed"
-  "/etc/opt/vivaldi/policies/managed"
-)
+if [[ -n "${XRAY_BROWSER_POLICY_DIRS:-}" ]]; then
+  policy_dir_list="${XRAY_BROWSER_POLICY_DIRS//$'\n'/:}"
+  policy_dir_list="${policy_dir_list//,/:}"
+  IFS=':' read -r -a policy_dirs <<<"$policy_dir_list"
+else
+  policy_dirs=(
+    "/etc/opt/chrome/policies/managed"
+    "/etc/chromium/policies/managed"
+    "/etc/opt/edge/policies/managed"
+    "/etc/brave/policies/managed"
+    "/etc/opt/brave.com/brave/policies/managed"
+    "/etc/opt/vivaldi/policies/managed"
+  )
+fi
+
+if [[ ${#policy_dirs[@]} -eq 0 ]]; then
+  echo "No browser policy directories configured." >&2
+  exit 1
+fi
 
 write_policy() {
   local dir="$1"

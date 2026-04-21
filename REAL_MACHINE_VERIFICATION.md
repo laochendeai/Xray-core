@@ -104,11 +104,17 @@ Use this when validating the privacy diagnostics and external IPPure result on t
    ./xray run -c /path/to/config.json
    ```
 2. Confirm the local SOCKS inbound is reachable. The default development config uses `127.0.0.1:11080`.
-3. Install daily-browser privacy policy and fully restart Chrome/Chromium-family browsers:
+3. Open WebPanel `/privacy` and use the Privacy Hardening Center:
+   - Click `Refresh Hardening Status`.
+   - On supported Linux Chromium-family setups, click `Install/Repair Browser Policy`.
+   - Fully close and restart Chrome/Chromium-family browsers after policy installation.
+   - Confirm `WebRtcIPHandling=disable_non_proxied_udp` and `DnsOverHttpsMode=off` on `chrome://policy` or `edge://policy`.
+   - Click `Open Controlled IPPure Browser` when visible randomized-fingerprint verification is needed.
+
+   The command-line fallback for daily-browser policy installation is:
    ```bash
    sudo ./scripts/install-browser-privacy-policy.sh
    ```
-   Confirm `WebRtcIPHandling=disable_non_proxied_udp` and `DnsOverHttpsMode=off` on `chrome://policy` or `edge://policy`.
 4. Run the hardened IPPure capture:
    ```bash
    IPPURE_OUTPUT_DIR=runtime/ippure-verification node scripts/verify-ippure.mjs
