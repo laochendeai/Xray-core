@@ -60,6 +60,7 @@ func TestBuildTunRuntimeConfigInjectsActivePool(t *testing.T) {
 		`"tag": "node-pool-active"`,
 		`"selector": [`,
 		`"pool-active-node-1"`,
+		`"address": "https://cloudflare-dns.com/dns-query"`,
 	} {
 		if !strings.Contains(rendered, token) {
 			t.Fatalf("expected runtime config to contain %q\n%s", token, rendered)
@@ -196,13 +197,13 @@ func TestSudoListingAllowsTunActionsWithoutPasswordRequiresExactArguments(t *tes
 		RuntimeConfigPath: "/repo/runtime/tun/config.json",
 		StateDir:          "/repo/runtime/tun",
 		InterfaceName:     "xray0",
-		RemoteDNS:         []string{"1.1.1.1", "8.8.8.8", "9.9.9.9"},
+		RemoteDNS:         []string{"https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query", "https://dns.quad9.net/dns-query"},
 	}
 
 	listing := `User leo may run the following commands:
     (ALL : ALL) ALL
-    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper start /repo/xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 1.1.1.1 8.8.8.8 9.9.9.9
-    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper stop /repo/xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 1.1.1.1 8.8.8.8 9.9.9.9`
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper start /repo/xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 https://cloudflare-dns.com/dns-query https://dns.google/dns-query https://dns.quad9.net/dns-query
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper stop /repo/xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 https://cloudflare-dns.com/dns-query https://dns.google/dns-query https://dns.quad9.net/dns-query`
 
 	if !sudoListingAllowsTunActionsWithoutPassword(settings, listing) {
 		t.Fatal("expected exact start and stop sudoers entries to be ready")
@@ -218,12 +219,12 @@ func TestSudoListingAllowsTunActionsWithoutPasswordRejectsStaleBinaryPath(t *tes
 		RuntimeConfigPath: "/repo/runtime/tun/config.json",
 		StateDir:          "/repo/runtime/tun",
 		InterfaceName:     "xray0",
-		RemoteDNS:         []string{"1.1.1.1", "8.8.8.8"},
+		RemoteDNS:         []string{"https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"},
 	}
 
 	listing := `User leo may run the following commands:
-    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper start /usr/local/bin/xray-webpanel-xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 1.1.1.1 8.8.8.8
-    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper stop /usr/local/bin/xray-webpanel-xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 1.1.1.1 8.8.8.8`
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper start /usr/local/bin/xray-webpanel-xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 https://cloudflare-dns.com/dns-query https://dns.google/dns-query
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper stop /usr/local/bin/xray-webpanel-xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 https://cloudflare-dns.com/dns-query https://dns.google/dns-query`
 
 	if sudoListingAllowsTunActionsWithoutPassword(settings, listing) {
 		t.Fatal("expected stale exact-argument sudoers entries to be rejected")
@@ -630,7 +631,8 @@ func TestTunManagerEditableSettingsPersistRemoteDNS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update editable settings: %v", err)
 	}
-	if !reflect.DeepEqual(settings.RemoteDNS, []string{"1.1.1.1", "8.8.8.8"}) {
+	expectedRemoteDNS := []string{"https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"}
+	if !reflect.DeepEqual(settings.RemoteDNS, expectedRemoteDNS) {
 		t.Fatalf("unexpected remote dns list: %v", settings.RemoteDNS)
 	}
 	loaded, err := tunManager.EditableSettings()
@@ -639,5 +641,29 @@ func TestTunManagerEditableSettingsPersistRemoteDNS(t *testing.T) {
 	}
 	if !reflect.DeepEqual(loaded.RemoteDNS, settings.RemoteDNS) {
 		t.Fatalf("expected remote dns to persist, got %v", loaded.RemoteDNS)
+	}
+}
+
+func TestNormalizeTunRemoteDNSForcesEncryptedResolvers(t *testing.T) {
+	t.Parallel()
+
+	actual := normalizeTunRemoteDNS([]string{
+		"tcp://1.1.1.1:53",
+		"udp://8.8.8.8:53",
+		"http://9.9.9.9/dns-query",
+		"223.5.5.5",
+		"https://example-dns.test/custom-query",
+		"tcp://dns.example.test:853",
+	})
+	expected := []string{
+		"https://cloudflare-dns.com/dns-query",
+		"https://dns.google/dns-query",
+		"https://dns.quad9.net/dns-query",
+		"https://dns.alidns.com/dns-query",
+		"https://example-dns.test/custom-query",
+		"https://dns.example.test/dns-query",
+	}
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("unexpected normalized remote DNS: %v", actual)
 	}
 }

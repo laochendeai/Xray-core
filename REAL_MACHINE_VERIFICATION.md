@@ -67,10 +67,10 @@ What this flow verifies:
 
 - `directEgress` before and after TUN enablement
 - same-user public IP changes once TUN is running, while the independent direct egress record stays stable
-- runtime DNS/routing markers in `runtime/tun/config.json`
+- runtime DNS/routing markers in `runtime/tun/config.json`, including encrypted DoH remote resolvers
 - one protected direct URL under transparent mode
 - one forced proxy-path probe via an active outbound
-- one HTTP/3 probe when local `curl` supports `--http3`; otherwise it records the UDP/443 and proxy-path prerequisites instead
+- one HTTP/3 probe when local `curl` supports `--http3`; otherwise it records the strict IPv4 capture, IPv6 leak-prevention, and proxy-path prerequisites instead
 
 Artifacts:
 
@@ -84,7 +84,7 @@ Artifacts:
   - `aggregation-runtime.json` when experimental aggregation scaffolding has been configured
   - `route-probe-cache.json`
   - `egress-probe-cache.json`
-  - route / rule / `resolvectl` captures
+  - route / rule / IPv6 disable-state / `resolvectl` captures
 
 How to read the IP fields reported by `baseline-summary.txt` and `baseline-summary.json`:
 
@@ -96,7 +96,7 @@ The fallback rehearsal remains a separate, extended verification and is not part
 
 ## IPPure Privacy Verification
 
-Use this when validating the privacy diagnostics and external IPPure result on the real machine. Do not use a normal daily browser as the acceptance path: transparent TUN stable mode captures TCP plus UDP/53 and UDP/443, but unmanaged WebRTC/STUN and browser fingerprint surfaces are browser-policy concerns.
+Use this when validating the privacy diagnostics and external IPPure result on the real machine. Strict transparent mode captures all non-bypassed IPv4 traffic through the TUN route table, disables IPv6 while enabled, and normalizes remote DNS to encrypted DoH resolvers so normal browser IPv6/DNS cannot bypass the tunnel. Browser fingerprint uniqueness still requires a browser-profile policy; the repository IPPure script enables a randomized fingerprint profile and disables WebRTC APIs by default for that acceptance path.
 
 1. Rebuild and restart the local runtime from this repo:
    ```bash
@@ -122,9 +122,11 @@ IPPURE_PROXY_SERVER=socks5://127.0.0.1:11080 node scripts/verify-ippure.mjs
 Pass conditions for issue-style verification:
 
 - `summary.json` records a non-empty `proxyServer` and a `proxySource` such as `env`, `cwd-config:*`, or `running-process:*`.
+- `summary.json` records `randomFingerprint=true`, `disableWebRTC=true`, and a non-empty `fingerprintProfile` unless explicitly disabled by environment variables.
 - IPPure WebRTC evidence does not expose the machine's direct public IP.
 - DNS evidence does not show local/private ISP resolver leakage on the unmanaged host path.
 - Any remaining IPPure purity score limitation is attributed to the selected node exit and belongs in the clean-node follow-up, not in the WebRTC/DNS leak closure.
+- A normal browser IPPure run should not expose the machine's direct IPv4 or any IPv6 address while transparent mode is enabled. If it does, treat that as a TUN/helper regression rather than a node-purity issue.
 
 ## Verification Scripts
 
@@ -155,6 +157,7 @@ This captures:
 - `runtime/tun/config.json`
 - `runtime/tun/xray-tun.log`
 - `ip link` and `ip route`
+- IPv6 disable-state sysctls
 
 ```bash
 ./scripts/verify-webpanel-control-plane.sh snapshot --config /path/to/config.json --output-dir /tmp/webpanel-proof
@@ -254,7 +257,8 @@ Pass condition:
 - `machineState=clean`
 - `running=false`
 - `lastStateReason=startup_default_clean`
-- no TCP or UDP/53 capture policy rules remain
+- no strict IPv4 full-tunnel capture policy rule remains
+- IPv6 disable state has been restored to the machine's pre-TUN values
 - the capture route table no longer points at the TUN interface
 - the TUN interface itself is absent
 

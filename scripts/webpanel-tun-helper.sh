@@ -28,9 +28,10 @@ UPSTREAM_RULE_PREF_BASE="${XRAY_TUN_UPSTREAM_RULE_PREF_BASE:-10000}"
 BYPASS_RULE_PREF="${XRAY_TUN_BYPASS_RULE_PREF:-12000}"
 BYPASS_UID_RANGE="${XRAY_TUN_BYPASS_UID_RANGE:-0-0}"
 CAPTURE_ROUTE_TABLE_ID="${XRAY_TUN_CAPTURE_ROUTE_TABLE_ID:-2028}"
-CAPTURE_DNS_RULE_PREF="${XRAY_TUN_CAPTURE_DNS_RULE_PREF:-12010}"
-CAPTURE_UDP_443_RULE_PREF="${XRAY_TUN_CAPTURE_UDP_443_RULE_PREF:-12015}"
-CAPTURE_TCP_RULE_PREF="${XRAY_TUN_CAPTURE_TCP_RULE_PREF:-12020}"
+CAPTURE_IPV4_RULE_PREF="${XRAY_TUN_CAPTURE_IPV4_RULE_PREF:-12020}"
+LEGACY_CAPTURE_DNS_RULE_PREF="${XRAY_TUN_CAPTURE_DNS_RULE_PREF:-12010}"
+LEGACY_CAPTURE_UDP_443_RULE_PREF="${XRAY_TUN_CAPTURE_UDP_443_RULE_PREF:-12015}"
+LEGACY_CAPTURE_TCP_RULE_PREF="${XRAY_TUN_CAPTURE_TCP_RULE_PREF:-12020}"
 
 require_root() {
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
@@ -138,6 +139,7 @@ write_state() {
   local rp_filter_all_old="$5"
   local rp_filter_tun_old="$6"
   local tun_name="$7"
+  local ipv6_disable_state="$8"
 
   mkdir -p "$STATE_DIR"
   cat >"$STATE_FILE" <<EOF
@@ -154,9 +156,11 @@ UPSTREAM_RULE_PREF_BASE='$UPSTREAM_RULE_PREF_BASE'
 BYPASS_RULE_PREF='$BYPASS_RULE_PREF'
 BYPASS_UID_RANGE='$BYPASS_UID_RANGE'
 CAPTURE_ROUTE_TABLE_ID='$CAPTURE_ROUTE_TABLE_ID'
-CAPTURE_DNS_RULE_PREF='$CAPTURE_DNS_RULE_PREF'
-CAPTURE_UDP_443_RULE_PREF='$CAPTURE_UDP_443_RULE_PREF'
-CAPTURE_TCP_RULE_PREF='$CAPTURE_TCP_RULE_PREF'
+CAPTURE_IPV4_RULE_PREF='$CAPTURE_IPV4_RULE_PREF'
+LEGACY_CAPTURE_DNS_RULE_PREF='$LEGACY_CAPTURE_DNS_RULE_PREF'
+LEGACY_CAPTURE_UDP_443_RULE_PREF='$LEGACY_CAPTURE_UDP_443_RULE_PREF'
+LEGACY_CAPTURE_TCP_RULE_PREF='$LEGACY_CAPTURE_TCP_RULE_PREF'
+IPV6_DISABLE_STATE='$ipv6_disable_state'
 EOF
   chmod 0644 "$STATE_FILE" 2>/dev/null || true
 }
@@ -183,9 +187,10 @@ clear_upstream_bypass_rules() {
 
 clear_policy_routes() {
   ip -4 rule del pref "$BYPASS_RULE_PREF" 2>/dev/null || true
-  ip -4 rule del pref "$CAPTURE_DNS_RULE_PREF" 2>/dev/null || true
-  ip -4 rule del pref "$CAPTURE_UDP_443_RULE_PREF" 2>/dev/null || true
-  ip -4 rule del pref "$CAPTURE_TCP_RULE_PREF" 2>/dev/null || true
+  ip -4 rule del pref "$CAPTURE_IPV4_RULE_PREF" 2>/dev/null || true
+  ip -4 rule del pref "$LEGACY_CAPTURE_DNS_RULE_PREF" 2>/dev/null || true
+  ip -4 rule del pref "$LEGACY_CAPTURE_UDP_443_RULE_PREF" 2>/dev/null || true
+  ip -4 rule del pref "$LEGACY_CAPTURE_TCP_RULE_PREF" 2>/dev/null || true
   ip route flush table "$ROUTE_TABLE_ID" 2>/dev/null || true
   ip route flush table "$CAPTURE_ROUTE_TABLE_ID" 2>/dev/null || true
 }
@@ -243,14 +248,64 @@ prepare_capture_route_table() {
   ip route replace table "$CAPTURE_ROUTE_TABLE_ID" 0.0.0.0/1 dev "$tun_name"
   ip route replace table "$CAPTURE_ROUTE_TABLE_ID" 128.0.0.0/1 dev "$tun_name"
 
-  ip -4 rule del pref "$CAPTURE_DNS_RULE_PREF" 2>/dev/null || true
-  ip -4 rule add pref "$CAPTURE_DNS_RULE_PREF" ipproto udp dport 53 lookup "$CAPTURE_ROUTE_TABLE_ID"
+  ip -4 rule del pref "$CAPTURE_IPV4_RULE_PREF" 2>/dev/null || true
+  ip -4 rule add pref "$CAPTURE_IPV4_RULE_PREF" lookup "$CAPTURE_ROUTE_TABLE_ID"
+}
 
-  ip -4 rule del pref "$CAPTURE_UDP_443_RULE_PREF" 2>/dev/null || true
-  ip -4 rule add pref "$CAPTURE_UDP_443_RULE_PREF" ipproto udp dport 443 lookup "$CAPTURE_ROUTE_TABLE_ID"
+collect_ipv6_disable_state() {
+  local path iface value
 
-  ip -4 rule del pref "$CAPTURE_TCP_RULE_PREF" 2>/dev/null || true
-  ip -4 rule add pref "$CAPTURE_TCP_RULE_PREF" ipproto tcp lookup "$CAPTURE_ROUTE_TABLE_ID"
+  [[ -d /proc/sys/net/ipv6/conf ]] || return 0
+  for path in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
+    [[ -r "$path" ]] || continue
+    iface="$(basename "$(dirname "$path")")"
+    value="$(tr -d '[:space:]' <"$path" 2>/dev/null || true)"
+    [[ "$value" =~ ^[01]$ ]] || continue
+    printf '%s=%s ' "$iface" "$value"
+  done | xargs
+}
+
+set_ipv6_disable_value() {
+  local iface="$1"
+  local value="$2"
+  local path="/proc/sys/net/ipv6/conf/${iface}/disable_ipv6"
+
+  [[ "$value" =~ ^[01]$ ]] || return 0
+  [[ -w "$path" ]] || return 0
+  printf '%s\n' "$value" >"$path" 2>/dev/null || true
+}
+
+disable_ipv6_for_transparent_mode() {
+  local path iface
+
+  [[ -d /proc/sys/net/ipv6/conf ]] || return 0
+  for path in /proc/sys/net/ipv6/conf/*/disable_ipv6; do
+    [[ -w "$path" ]] || continue
+    iface="$(basename "$(dirname "$path")")"
+    set_ipv6_disable_value "$iface" 1
+  done
+}
+
+restore_ipv6_disable_state() {
+  local ipv6_disable_state="$1"
+  local pair iface value
+
+  [[ -n "$ipv6_disable_state" ]] || return 0
+
+  for iface in default all; do
+    for pair in $ipv6_disable_state; do
+      [[ "${pair%%=*}" == "$iface" ]] || continue
+      set_ipv6_disable_value "$iface" "${pair#*=}"
+      break
+    done
+  done
+
+  for pair in $ipv6_disable_state; do
+    iface="${pair%%=*}"
+    value="${pair#*=}"
+    [[ "$iface" != "all" && "$iface" != "default" ]] || continue
+    set_ipv6_disable_value "$iface" "$value"
+  done
 }
 
 resolved_link_has_dns_scope() {
@@ -442,6 +497,7 @@ cleanup_network_state() {
   local dns_overridden="0"
   local rp_filter_all_old=""
   local rp_filter_tun_old=""
+  local ipv6_disable_state=""
   local tun_name
   tun_name="$(active_tun_name)"
 
@@ -458,9 +514,11 @@ cleanup_network_state() {
   BYPASS_RULE_PREF="${BYPASS_RULE_PREF:-12000}"
   BYPASS_UID_RANGE="${BYPASS_UID_RANGE:-0-0}"
   CAPTURE_ROUTE_TABLE_ID="${CAPTURE_ROUTE_TABLE_ID:-2028}"
-  CAPTURE_DNS_RULE_PREF="${CAPTURE_DNS_RULE_PREF:-12010}"
-  CAPTURE_UDP_443_RULE_PREF="${CAPTURE_UDP_443_RULE_PREF:-12015}"
-  CAPTURE_TCP_RULE_PREF="${CAPTURE_TCP_RULE_PREF:-12020}"
+  CAPTURE_IPV4_RULE_PREF="${CAPTURE_IPV4_RULE_PREF:-${CAPTURE_TCP_RULE_PREF:-12020}}"
+  LEGACY_CAPTURE_DNS_RULE_PREF="${LEGACY_CAPTURE_DNS_RULE_PREF:-${CAPTURE_DNS_RULE_PREF:-12010}}"
+  LEGACY_CAPTURE_UDP_443_RULE_PREF="${LEGACY_CAPTURE_UDP_443_RULE_PREF:-${CAPTURE_UDP_443_RULE_PREF:-12015}}"
+  LEGACY_CAPTURE_TCP_RULE_PREF="${LEGACY_CAPTURE_TCP_RULE_PREF:-${CAPTURE_TCP_RULE_PREF:-12020}}"
+  ipv6_disable_state="${IPV6_DISABLE_STATE:-}"
 
   if [[ -z "$default_gw" || -z "$default_dev" ]]; then
     mapfile -t default_route < <(read_default_route)
@@ -482,6 +540,7 @@ cleanup_network_state() {
   if [[ "$dns_overridden" == "1" ]] || link_uses_remote_dns_override "$default_dev"; then
     restore_dns "$default_dev"
   fi
+  restore_ipv6_disable_state "$ipv6_disable_state"
   if [[ -n "$rp_filter_tun_old" ]] && ip link show "$tun_name" >/dev/null 2>&1; then
     sysctl -w "net.ipv4.conf.${tun_name}.rp_filter=$rp_filter_tun_old" >/dev/null 2>&1 || true
   fi
@@ -560,16 +619,21 @@ configure_network_state() {
   local dns_overridden="0"
   local rp_filter_all_old
   local rp_filter_tun_old
+  local ipv6_disable_state
 
   upstream_ips="$(extract_upstream_ips | tr '\n' ' ' | xargs)"
   rp_filter_all_old="$(sysctl -n net.ipv4.conf.all.rp_filter 2>/dev/null || echo 0)"
   rp_filter_tun_old="$(sysctl -n "net.ipv4.conf.${tun_name}.rp_filter" 2>/dev/null || true)"
+  ipv6_disable_state="$(collect_ipv6_disable_state)"
+  write_state "$default_gw" "$default_dev" "$upstream_ips" "$dns_overridden" "$rp_filter_all_old" "$rp_filter_tun_old" "$tun_name" "$ipv6_disable_state"
+
   sysctl -w net.ipv4.conf.all.rp_filter=0 >/dev/null
   if [[ -n "$rp_filter_tun_old" ]]; then
     # Linux uses the max(all, iface) rp_filter value. Leaving xray0 at 2 can
     # drop locally-originated packets before they ever reach the TUN runtime.
     sysctl -w "net.ipv4.conf.${tun_name}.rp_filter=0" >/dev/null
   fi
+  disable_ipv6_for_transparent_mode
 
   set_nm_unmanaged "$tun_name"
   prepare_bypass_route_table "$tun_name"
@@ -579,7 +643,7 @@ configure_network_state() {
     restore_dns "$default_dev"
   fi
 
-  write_state "$default_gw" "$default_dev" "$upstream_ips" "$dns_overridden" "$rp_filter_all_old" "$rp_filter_tun_old" "$tun_name"
+  write_state "$default_gw" "$default_dev" "$upstream_ips" "$dns_overridden" "$rp_filter_all_old" "$rp_filter_tun_old" "$tun_name" "$ipv6_disable_state"
 }
 
 is_tun_active() {
@@ -594,10 +658,7 @@ is_tun_active() {
   if ip route show 0.0.0.0/1 dev "$tun_name" | grep -q .; then
     return 0
   fi
-  if ip -4 rule show pref "$CAPTURE_TCP_RULE_PREF" 2>/dev/null | grep -Eq "ipproto tcp .*lookup $CAPTURE_ROUTE_TABLE_ID|ipproto tcp lookup $CAPTURE_ROUTE_TABLE_ID"; then
-    return 0
-  fi
-  if ip -4 rule show pref "$CAPTURE_UDP_443_RULE_PREF" 2>/dev/null | grep -Eq "ipproto udp.* dport 443 .*lookup $CAPTURE_ROUTE_TABLE_ID|ipproto udp dport 443 lookup $CAPTURE_ROUTE_TABLE_ID"; then
+  if ip -4 rule show pref "$CAPTURE_IPV4_RULE_PREF" 2>/dev/null | grep -Eq "lookup $CAPTURE_ROUTE_TABLE_ID\\b"; then
     return 0
   fi
   ip route show table "$CAPTURE_ROUTE_TABLE_ID" 0.0.0.0/1 dev "$tun_name" | grep -q .

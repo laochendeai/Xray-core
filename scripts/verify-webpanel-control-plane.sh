@@ -125,22 +125,28 @@ check_network_surface() {
     fail "Missing bypass policy rule for helper traffic"
   fi
 
-  if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_DNS_RULE_PREF}:.*ipproto udp.* dport 53 .*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
-    pass "UDP/53 capture policy rule is active"
+  if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_IPV4_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+    pass "Strict IPv4 full-tunnel capture policy rule is active"
   else
-    fail "Missing UDP/53 capture policy rule"
+    fail "Missing strict IPv4 full-tunnel capture policy rule"
   fi
 
-  if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_UDP_443_RULE_PREF}:.*ipproto udp.* dport 443 .*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
-    pass "UDP/443 capture policy rule is active"
+  if ip -4 rule show | grep -Eq "^${WEBPANEL_LEGACY_CAPTURE_DNS_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+    fail "Legacy UDP/53-only capture policy rule is still active"
   else
-    fail "Missing UDP/443 capture policy rule"
+    pass "Legacy UDP/53-only capture policy rule is absent"
   fi
 
-  if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_TCP_RULE_PREF}:.*ipproto tcp .*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b|^${WEBPANEL_CAPTURE_TCP_RULE_PREF}:.*ipproto tcp lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
-    pass "TCP capture policy rule is active"
+  if ip -4 rule show | grep -Eq "^${WEBPANEL_LEGACY_CAPTURE_UDP_443_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+    fail "Legacy UDP/443-only capture policy rule is still active"
   else
-    fail "Missing TCP capture policy rule"
+    pass "Legacy UDP/443-only capture policy rule is absent"
+  fi
+
+  if ip -4 rule show | grep -Eq "^${WEBPANEL_LEGACY_CAPTURE_TCP_RULE_PREF}:.*ipproto tcp .*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b|^${WEBPANEL_LEGACY_CAPTURE_TCP_RULE_PREF}:.*ipproto tcp lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+    fail "Legacy TCP-only capture policy rule is still active"
+  else
+    pass "Legacy TCP-only capture policy rule is absent"
   fi
 
   if ip route show table "$WEBPANEL_CAPTURE_ROUTE_TABLE_ID" | grep -Eq "^0\\.0\\.0\\.0/1 dev ${WEBPANEL_TUN_INTERFACE}\b"; then
@@ -153,6 +159,16 @@ check_network_surface() {
     pass "Upper capture route is attached to $WEBPANEL_TUN_INTERFACE"
   else
     fail "Missing upper capture route on $WEBPANEL_TUN_INTERFACE"
+  fi
+
+  if [[ -d /proc/sys/net/ipv6/conf ]]; then
+    if find /proc/sys/net/ipv6/conf -name disable_ipv6 -type f -exec sh -c 'for path do [ "$(cat "$path" 2>/dev/null)" = "1" ] || exit 1; done' sh {} +; then
+      pass "IPv6 is disabled while transparent mode is running"
+    else
+      fail "IPv6 is not fully disabled while transparent mode is running"
+    fi
+  else
+    pass "IPv6 sysctl tree is unavailable, so no IPv6 host path is exposed"
   fi
 }
 
@@ -259,22 +275,28 @@ run_post_reboot() {
       pass "TUN interface is absent after reboot"
     fi
 
-    if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_DNS_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
-      fail "UDP/53 capture rule still exists after reboot"
+    if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_IPV4_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+      fail "Strict IPv4 full-tunnel capture rule still exists after reboot"
     else
-      pass "UDP/53 capture rule is absent after reboot"
+      pass "Strict IPv4 full-tunnel capture rule is absent after reboot"
     fi
 
-    if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_UDP_443_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
-      fail "UDP/443 capture rule still exists after reboot"
+    if ip -4 rule show | grep -Eq "^${WEBPANEL_LEGACY_CAPTURE_DNS_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+      fail "Legacy UDP/53 capture rule still exists after reboot"
     else
-      pass "UDP/443 capture rule is absent after reboot"
+      pass "Legacy UDP/53 capture rule is absent after reboot"
     fi
 
-    if ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_TCP_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
-      fail "TCP capture rule still exists after reboot"
+    if ip -4 rule show | grep -Eq "^${WEBPANEL_LEGACY_CAPTURE_UDP_443_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+      fail "Legacy UDP/443 capture rule still exists after reboot"
     else
-      pass "TCP capture rule is absent after reboot"
+      pass "Legacy UDP/443 capture rule is absent after reboot"
+    fi
+
+    if ip -4 rule show | grep -Eq "^${WEBPANEL_LEGACY_CAPTURE_TCP_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+      fail "Legacy TCP capture rule still exists after reboot"
+    else
+      pass "Legacy TCP capture rule is absent after reboot"
     fi
 
     if ip -4 rule show | grep -Eq "^${WEBPANEL_BYPASS_RULE_PREF}:.*lookup ${WEBPANEL_BYPASS_ROUTE_TABLE_ID}\b"; then
