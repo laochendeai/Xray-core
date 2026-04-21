@@ -231,6 +231,27 @@ func TestSudoListingAllowsTunActionsWithoutPasswordRejectsStaleBinaryPath(t *tes
 	}
 }
 
+func TestSudoListingAllowsTunActionsWithoutPasswordHandlesEscapedSudoersOutput(t *testing.T) {
+	t.Parallel()
+
+	settings := &TunFeatureSettings{
+		HelperPath:        "/usr/local/libexec/xray-webpanel-tun-helper",
+		BinaryPath:        "/repo/xray",
+		RuntimeConfigPath: "/repo/runtime/tun/config.json",
+		StateDir:          "/repo/runtime/tun",
+		InterfaceName:     "xray0",
+		RemoteDNS:         []string{"https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query", "https://dns.quad9.net/dns-query"},
+	}
+
+	listing := `User leo may run the following commands:
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper start /repo/xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 https\://cloudflare-dns.com/dns-query https\://dns.google/dns-query https\://dns.quad9.net/dns-query
+    (root) NOPASSWD: /usr/local/libexec/xray-webpanel-tun-helper stop /repo/xray /repo/runtime/tun/config.json /repo/runtime/tun xray0 https\://cloudflare-dns.com/dns-query https\://dns.google/dns-query https\://dns.quad9.net/dns-query`
+
+	if !sudoListingAllowsTunActionsWithoutPassword(settings, listing) {
+		t.Fatal("expected escaped sudoers listing output to be accepted")
+	}
+}
+
 func TestTunManagerResolveRepoScriptPathPrefersRunningBinaryDirectory(t *testing.T) {
 	t.Parallel()
 

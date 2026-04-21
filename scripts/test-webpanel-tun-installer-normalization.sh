@@ -31,6 +31,24 @@ python3 "$ROOT_DIR/scripts/normalize-webpanel-tun-config.py" \
   "/usr/local/libexec/xray-webpanel-tun-helper" \
   "/usr/local/bin/xray-webpanel-xray"
 
+SUDOERS_PATH="$TMP_DIR/xray-webpanel-tun"
+python3 "$ROOT_DIR/scripts/render-webpanel-tun-sudoers.py" \
+  "leo-cy" \
+  "/usr/local/libexec/xray-webpanel-tun-helper" \
+  "/usr/local/bin/xray-webpanel-xray" \
+  "/tmp/xray-runtime/tun/config.json" \
+  "/tmp/xray-runtime/tun" \
+  "xray0" \
+  "https://cloudflare-dns.com/dns-query" \
+  "https://dns.google/dns-query" \
+  "https://dns.quad9.net/dns-query" \
+  "https://doh.pub/dns-query" \
+  "https://[2606:4700:4700::1111]/dns-query" >"$SUDOERS_PATH"
+
+visudo -cf "$SUDOERS_PATH" >/dev/null
+grep -Fq 'https\://cloudflare-dns.com/dns-query' "$SUDOERS_PATH"
+grep -Fq 'https\://[2606\:4700\:4700\:\:1111]/dns-query' "$SUDOERS_PATH"
+
 python3 - "$CONFIG_PATH" <<'PY'
 import json
 import sys

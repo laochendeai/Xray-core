@@ -30,6 +30,15 @@ HELPER_DST="/usr/local/libexec/xray-webpanel-tun-helper"
 XRAY_SRC="$REPO_ROOT/xray"
 XRAY_DST="/usr/local/bin/xray-webpanel-xray"
 SUDOERS_FILE="/etc/sudoers.d/xray-webpanel-tun"
+TMP_SUDOERS_FILE=""
+
+cleanup_temp_sudoers() {
+  if [[ -n "$TMP_SUDOERS_FILE" && -f "$TMP_SUDOERS_FILE" ]]; then
+    rm -f "$TMP_SUDOERS_FILE"
+  fi
+}
+
+trap cleanup_temp_sudoers EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -142,15 +151,21 @@ for dns in "${REMOTE_DNS[@]}"; do
   cmd_suffix_toggle+=" $dns"
 done
 
-cat >"$SUDOERS_FILE" <<EOF
-# Managed by install-webpanel-tun-sudoers.sh
-$TARGET_USER ALL=(root) NOPASSWD: $HELPER_DST $cmd_suffix_start
-$TARGET_USER ALL=(root) NOPASSWD: $HELPER_DST $cmd_suffix_stop
-$TARGET_USER ALL=(root) NOPASSWD: $HELPER_DST $cmd_suffix_toggle
-EOF
+TMP_SUDOERS_FILE="$(mktemp)"
+python3 "$SCRIPT_DIR/render-webpanel-tun-sudoers.py" \
+  "$TARGET_USER" \
+  "$HELPER_DST" \
+  "$XRAY_DST" \
+  "$RUNTIME_CONFIG_PATH" \
+  "$STATE_DIR" \
+  "$INTERFACE_NAME" \
+  "${REMOTE_DNS[@]}" >"$TMP_SUDOERS_FILE"
 
-chmod 0440 "$SUDOERS_FILE"
-visudo -cf "$SUDOERS_FILE" >/dev/null
+chmod 0440 "$TMP_SUDOERS_FILE"
+visudo -cf "$TMP_SUDOERS_FILE" >/dev/null
+install -o root -g root -m 0440 "$TMP_SUDOERS_FILE" "$SUDOERS_FILE"
+cleanup_temp_sudoers
+TMP_SUDOERS_FILE=""
 
 cat <<EOF
 Installed helper: $HELPER_DST
