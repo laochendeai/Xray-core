@@ -3190,8 +3190,7 @@ func sudoListingHasNoPasswordCommand(listing, expectedCommand string) bool {
 			if passwdIndex := strings.Index(section, "PASSWD:"); passwdIndex >= 0 {
 				section = section[:passwdIndex]
 			}
-			for _, command := range strings.Split(section, ",") {
-				command = strings.TrimSpace(command)
+			for _, command := range splitSudoCommandSpecs(section) {
 				if command == "ALL" || command == expectedCommand {
 					return true
 				}
@@ -3200,6 +3199,41 @@ func sudoListingHasNoPasswordCommand(listing, expectedCommand string) bool {
 	}
 
 	return false
+}
+
+func splitSudoCommandSpecs(section string) []string {
+	commands := make([]string, 0, 1)
+	var current strings.Builder
+	escaped := false
+
+	for _, char := range section {
+		if escaped {
+			current.WriteRune(char)
+			escaped = false
+			continue
+		}
+
+		switch char {
+		case '\\':
+			escaped = true
+		case ',':
+			if token := strings.TrimSpace(current.String()); token != "" {
+				commands = append(commands, token)
+			}
+			current.Reset()
+		default:
+			current.WriteRune(char)
+		}
+	}
+
+	if escaped {
+		current.WriteRune('\\')
+	}
+	if token := strings.TrimSpace(current.String()); token != "" {
+		commands = append(commands, token)
+	}
+
+	return commands
 }
 
 func filesMatch(leftPath, rightPath string) (bool, error) {
