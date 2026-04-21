@@ -513,6 +513,7 @@ export type TunDestinationBindingPreset =
   | "chatgpt"
   | "claude"
   | "gemini"
+  | "github"
   | "github_copilot"
   | "openrouter"
   | "cursor"

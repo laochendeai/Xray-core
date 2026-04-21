@@ -82,6 +82,7 @@ const (
 	TunDestinationBindingPresetChatGPT       TunDestinationBindingPreset = "chatgpt"
 	TunDestinationBindingPresetClaude        TunDestinationBindingPreset = "claude"
 	TunDestinationBindingPresetGemini        TunDestinationBindingPreset = "gemini"
+	TunDestinationBindingPresetGitHub        TunDestinationBindingPreset = "github"
 	TunDestinationBindingPresetGitHubCopilot TunDestinationBindingPreset = "github_copilot"
 	TunDestinationBindingPresetOpenRouter    TunDestinationBindingPreset = "openrouter"
 	TunDestinationBindingPresetCursor        TunDestinationBindingPreset = "cursor"
@@ -159,6 +160,13 @@ var tunDestinationBindingPresetDomains = map[TunDestinationBindingPreset][]strin
 		"domain:ai.google.dev",
 		"domain:aistudio.google.com",
 		"full:generativelanguage.googleapis.com",
+	},
+	TunDestinationBindingPresetGitHub: {
+		"full:api.github.com",
+		"domain:github.com",
+		"domain:githubusercontent.com",
+		"domain:githubassets.com",
+		"domain:github.io",
 	},
 	TunDestinationBindingPresetGitHubCopilot: {
 		"full:github.com",
@@ -1989,6 +1997,8 @@ func normalizeTunDestinationBindingPreset(value string) TunDestinationBindingPre
 		return TunDestinationBindingPresetClaude
 	case TunDestinationBindingPresetGemini:
 		return TunDestinationBindingPresetGemini
+	case TunDestinationBindingPresetGitHub:
+		return TunDestinationBindingPresetGitHub
 	case TunDestinationBindingPresetGitHubCopilot:
 		return TunDestinationBindingPresetGitHubCopilot
 	case TunDestinationBindingPresetOpenRouter:
@@ -3041,17 +3051,59 @@ func checkSudoReady(settings *TunFeatureSettings) bool {
 		return false
 	}
 
-	listing := string(output)
+	return sudoListingAllowsTunActionsWithoutPassword(settings, string(output))
+}
+
+func sudoListingAllowsTunActionsWithoutPassword(settings *TunFeatureSettings, listing string) bool {
 	if settings == nil {
-		return strings.Contains(listing, "NOPASSWD")
+		return strings.Contains(listing, "NOPASSWD:")
+	}
+	if settings.HelperPath == "" || settings.BinaryPath == "" || settings.RuntimeConfigPath == "" || settings.StateDir == "" {
+		return false
 	}
 
-	if settings.HelperPath != "" && strings.Contains(listing, settings.HelperPath) {
-		return true
+	interfaceName := strings.TrimSpace(settings.InterfaceName)
+	if interfaceName == "" {
+		interfaceName = "xray0"
+	}
+	remoteDNS := settings.RemoteDNS
+	if len(remoteDNS) == 0 {
+		remoteDNS = defaultTunDNS
 	}
 
-	if settings.BinaryPath != "" && strings.Contains(listing, settings.BinaryPath) {
-		return true
+	required := make([]string, 0, 2)
+	for _, action := range []string{"start", "stop"} {
+		args := []string{settings.HelperPath, action, settings.BinaryPath, settings.RuntimeConfigPath, settings.StateDir, interfaceName}
+		args = append(args, remoteDNS...)
+		required = append(required, strings.Join(args, " "))
+	}
+
+	for _, command := range required {
+		if !sudoListingHasNoPasswordCommand(listing, command) {
+			return false
+		}
+	}
+	return true
+}
+
+func sudoListingHasNoPasswordCommand(listing, expectedCommand string) bool {
+	expectedCommand = strings.TrimSpace(expectedCommand)
+	if expectedCommand == "" {
+		return false
+	}
+
+	for _, line := range strings.Split(listing, "\n") {
+		for _, section := range strings.Split(line, "NOPASSWD:")[1:] {
+			if passwdIndex := strings.Index(section, "PASSWD:"); passwdIndex >= 0 {
+				section = section[:passwdIndex]
+			}
+			for _, command := range strings.Split(section, ",") {
+				command = strings.TrimSpace(command)
+				if command == "ALL" || command == expectedCommand {
+					return true
+				}
+			}
+		}
 	}
 
 	return false

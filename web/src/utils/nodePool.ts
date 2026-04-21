@@ -58,6 +58,13 @@ export const tunDestinationBindingPresetDomains: Record<
     "domain:aistudio.google.com",
     "full:generativelanguage.googleapis.com",
   ],
+  github: [
+    "full:api.github.com",
+    "domain:github.com",
+    "domain:githubusercontent.com",
+    "domain:githubassets.com",
+    "domain:github.io",
+  ],
   github_copilot: [
     "full:github.com",
     "full:api.github.com",
