@@ -28,6 +28,9 @@ go test ./app/webpanel/...
 log "Locale sync"
 bash scripts/check-locale-sync.sh
 
+log "TUN installer normalization"
+bash scripts/test-webpanel-tun-installer-normalization.sh
+
 log "Local-state guard"
 bash scripts/check-local-state-guard.sh
 
