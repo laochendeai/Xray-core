@@ -1066,6 +1066,9 @@ func (sm *SubscriptionManager) refreshSubscriptionLocked(id string) error {
 			continue
 		}
 		nodeID := hashID(uri)
+		if newNodeIDs[nodeID] {
+			continue
+		}
 		newNodeIDs[nodeID] = true
 
 		if idx, exists := existingByID[nodeID]; exists {

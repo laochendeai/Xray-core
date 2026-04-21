@@ -569,21 +569,63 @@ export interface PrivacyWebRTCResult {
   error?: string;
 }
 
+export interface PrivacyIpExposureResult {
+  leakRisk: "unknown" | "low" | "warning" | "high";
+  browserIp: string;
+  directIp: string;
+  proxyIp: string;
+  browserMatchesDirect: boolean;
+  browserMatchesProxy: boolean;
+  tunRunning: boolean;
+  error?: string;
+}
+
 export interface PrivacyDnsResult {
-  leakRisk: "unknown" | "low" | "warning";
+  leakRisk: "unknown" | "low" | "warning" | "high";
   expectedRemoteDns: string[];
   tunRunning: boolean;
   routeMode: TunRouteMode | string;
+  hasRemoteDnsRoute?: boolean;
+  hasDirectDnsRoute?: boolean;
+  hasRemoteResolvers?: boolean;
   notes: string[];
 }
 
+export interface PrivacyFingerprintSnapshot {
+  userAgent: string;
+  languages: string[];
+  timezone: string;
+  screen: {
+    width: number;
+    height: number;
+    colorDepth: number;
+    devicePixelRatio: number;
+  };
+  hardwareConcurrency: number | null;
+  deviceMemory: number | null;
+  cookieEnabled: boolean;
+  doNotTrack: string | null;
+  canvasHash: string;
+  webglVendor: string;
+  webglRenderer: string;
+  audioSampleRate: number | null;
+}
+
+export interface PrivacyFingerprintResult {
+  leakRisk: "unknown" | "low" | "warning" | "high";
+  highEntropySurfaceCount: number;
+  snapshot?: PrivacyFingerprintSnapshot;
+  error?: string;
+}
+
 export interface PrivacyDiagnosticsRun {
+  ip?: PrivacyIpExposureResult;
   dns: PrivacyDnsResult;
   webrtc: PrivacyWebRTCResult;
+  fingerprint?: PrivacyFingerprintResult;
 }
 
 export interface PrivacyDiagnosticsPageState {
   context?: PrivacyDiagnosticsContextResponse;
   run?: PrivacyDiagnosticsRun;
 }
-
