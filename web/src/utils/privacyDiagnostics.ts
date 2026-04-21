@@ -152,7 +152,6 @@ export function classifyRuntimeDnsRisk(
   );
   const hasDirectDnsRoute = diagnostics.some(
     (diagnostic) =>
-      diagnostic.dnsPath !== "dns-cn" &&
       diagnostic.dnsPath !== "dns-direct-local" &&
       diagnostic.route.toLowerCase() === "direct",
   );

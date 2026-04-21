@@ -156,6 +156,76 @@ describe("privacy diagnostics utilities", () => {
     });
   });
 
+  it("treats legacy China DNS direct routing as a leak risk", () => {
+    const context: PrivacyDiagnosticsContextResponse = {
+      supported: true,
+      tunStatus: {
+        status: "running",
+        running: true,
+        available: true,
+        allowRemote: false,
+        useSudo: false,
+        helperExists: true,
+        elevationReady: true,
+        helperCurrent: true,
+        binaryCurrent: true,
+        privilegeInstallRecommended: false,
+        binaryPath: "/tmp/xray",
+        helperPath: "/tmp/helper",
+        stateDir: "/tmp/state",
+        runtimeConfigPath: "/tmp/state/config.json",
+        interfaceName: "xray0",
+        mtu: 1500,
+        remoteDns: ["1.1.1.1"],
+        configPath: "/tmp/config.json",
+        xrayBinary: "/tmp/xray",
+        message: "running",
+        routingDiagnostics: [
+          {
+            category: "cn_direct_domains",
+            dnsPath: "dns-cn",
+            resolver: "https://dns.alidns.com/dns-query",
+            route: "direct",
+            reason: "legacy China DNS direct route",
+          },
+          {
+            category: "default_proxy_domains",
+            dnsPath: "dns-remote",
+            resolver: "1.1.1.1",
+            route: "proxy(node-pool-active)",
+            reason: "remote DNS",
+          },
+        ],
+      },
+      tunSettings: {
+        selectionPolicy: "fastest",
+        routeMode: "strict_proxy",
+        remoteDns: ["1.1.1.1"],
+        protectDomains: [],
+        protectCidrs: [],
+        destinationBindings: [],
+        aggregation: {
+          enabled: false,
+          mode: "single_best",
+          maxPathsPerSession: 1,
+          schedulerPolicy: "single_best",
+          relayEndpoint: "",
+          health: {
+            maxSessionLossPct: 5,
+            maxPathJitterMs: 250,
+            rollbackOnConsecutiveFailures: 2,
+          },
+        },
+      },
+    };
+
+    expect(classifyRuntimeDnsRisk(context)).toMatchObject({
+      leakRisk: "warning",
+      hasRemoteDnsRoute: true,
+      hasDirectDnsRoute: true,
+    });
+  });
+
   it("raises fingerprint risk when high entropy surfaces are present", () => {
     expect(
       classifyFingerprintRisk({

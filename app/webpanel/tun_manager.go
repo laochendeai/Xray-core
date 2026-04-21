@@ -51,10 +51,6 @@ var (
 		"https://cloudflare-dns.com/dns-query",
 		"https://dns.google/dns-query",
 	}
-	defaultTunChinaDNS = []string{
-		"https://dns.alidns.com/dns-query",
-		"https://doh.pub/dns-query",
-	}
 )
 
 type TunSelectionPolicy string
@@ -1492,7 +1488,7 @@ func buildTunRuntimeConfigWithDirectProbeResults(raw []byte, settings *TunFeatur
 	resolvedProbeResults := resolveTunDirectProbeResults(settings, existingRules, directProbeResults)
 	priorityRules, _ := splitTunRoutingRules(existingRules)
 	priorityRules = filterTunPriorityRules(priorityRules, settings, resolvedProbeResults)
-	prependRules := make([]interface{}, 0, 5)
+	prependRules := make([]interface{}, 0, 4)
 	prependRules = append(prependRules, map[string]interface{}{
 		"type":        "field",
 		"inboundTag":  []string{"tun-in"},
@@ -1518,34 +1514,12 @@ func buildTunRuntimeConfigWithDirectProbeResults(raw []byte, settings *TunFeatur
 			"outboundTag": "direct",
 		})
 	}
-	if runtimeAssetExists(settings, "geosite.dat") {
-		prependRules = append(prependRules, map[string]interface{}{
-			"type":        "field",
-			"inboundTag":  []string{"dns-cn"},
-			"outboundTag": "direct",
-		})
-	}
 	prependRules = append(prependRules, map[string]interface{}{
 		"type":        "field",
 		"inboundTag":  []string{"dns-remote"},
 		"balancerTag": "node-pool-active",
 	})
 
-	tunDirectRules := make([]interface{}, 0, 2)
-	if runtimeAssetExists(settings, "geosite.dat") {
-		tunDirectRules = append(tunDirectRules, map[string]interface{}{
-			"type":        "field",
-			"domain":      []string{"geosite:cn"},
-			"outboundTag": "direct",
-		})
-	}
-	if runtimeAssetExists(settings, "geoip.dat") {
-		tunDirectRules = append(tunDirectRules, map[string]interface{}{
-			"type":        "field",
-			"ip":          []string{"geoip:cn"},
-			"outboundTag": "direct",
-		})
-	}
 	tunCatchAllRule := map[string]interface{}{
 		"type":        "field",
 		"inboundTag":  []string{"tun-in"},
@@ -1555,7 +1529,6 @@ func buildTunRuntimeConfigWithDirectProbeResults(raw []byte, settings *TunFeatur
 
 	rules := append(prependRules, priorityRules...)
 	rules = append(rules, bindingRules...)
-	rules = append(rules, tunDirectRules...)
 	rules = append(rules, tunCatchAllRule)
 	routing["rules"] = rules
 
@@ -1728,9 +1701,7 @@ func buildActivePoolOutbounds(activeNodes []NodeRecord) ([]interface{}, error) {
 }
 
 func buildTunDNSConfig(settings *TunFeatureSettings) map[string]interface{} {
-	servers := make([]interface{}, 0, 1+len(defaultTunChinaDNS)+len(settings.RemoteDNS))
-	hasGeosite := runtimeAssetExists(settings, "geosite.dat")
-	hasGeoip := runtimeAssetExists(settings, "geoip.dat")
+	servers := make([]interface{}, 0, 1+len(settings.RemoteDNS))
 	protectedDomains := uniqStrings(append([]string{}, settings.ProtectDomains...))
 
 	if len(protectedDomains) > 0 {
@@ -1740,21 +1711,6 @@ func buildTunDNSConfig(settings *TunFeatureSettings) map[string]interface{} {
 			"skipFallback": true,
 			"tag":          "dns-direct-local",
 		})
-	}
-
-	if hasGeosite {
-		for _, address := range defaultTunChinaDNS {
-			server := map[string]interface{}{
-				"address":      normalizeTunResolverAddress(address),
-				"domains":      []string{"geosite:cn"},
-				"skipFallback": true,
-				"tag":          "dns-cn",
-			}
-			if hasGeoip {
-				server["expectIPs"] = []string{"geoip:cn"}
-			}
-			servers = append(servers, server)
-		}
 	}
 
 	for _, address := range uniqStrings(normalizeTunRemoteDNS(settings.RemoteDNS)) {
@@ -1771,7 +1727,7 @@ func buildTunDNSConfig(settings *TunFeatureSettings) map[string]interface{} {
 	return map[string]interface{}{
 		"servers":                servers,
 		"queryStrategy":          "UseIP",
-		"disableFallbackIfMatch": hasGeosite,
+		"disableFallbackIfMatch": len(protectedDomains) > 0,
 	}
 }
 
