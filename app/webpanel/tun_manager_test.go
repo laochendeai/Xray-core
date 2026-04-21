@@ -230,6 +230,43 @@ func TestSudoListingAllowsTunActionsWithoutPasswordRejectsStaleBinaryPath(t *tes
 	}
 }
 
+func TestTunManagerResolveRepoScriptPathPrefersRunningBinaryDirectory(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	runningRepo := filepath.Join(tempDir, "current")
+	configRepo := filepath.Join(tempDir, "config")
+	for _, dir := range []string{
+		filepath.Join(runningRepo, "scripts"),
+		filepath.Join(configRepo, "scripts"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	currentHelper := filepath.Join(runningRepo, "scripts", "webpanel-tun-helper.sh")
+	if err := os.WriteFile(currentHelper, []byte("current"), 0o755); err != nil {
+		t.Fatalf("write current helper: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configRepo, "scripts", "webpanel-tun-helper.sh"), []byte("stale"), 0o755); err != nil {
+		t.Fatalf("write stale helper: %v", err)
+	}
+
+	manager := &TunManager{
+		xrayBin:    filepath.Join(runningRepo, "xray"),
+		configPath: filepath.Join(configRepo, "dev-config.current-nodes.json"),
+	}
+
+	resolved, err := manager.resolveRepoScriptPath("webpanel-tun-helper.sh")
+	if err != nil {
+		t.Fatalf("resolve script path: %v", err)
+	}
+	if resolved != currentHelper {
+		t.Fatalf("expected current repo helper %q, got %q", currentHelper, resolved)
+	}
+}
+
 func TestBuildTunRuntimeConfigPlacesTunCatchAllAfterSpecificProxyRules(t *testing.T) {
 	t.Parallel()
 

@@ -591,11 +591,11 @@ func (m *TunManager) installPrivilegeLocked(settings *TunFeatureSettings) (strin
 		return "", fmt.Errorf("resolve current xray binary: %w", err)
 	}
 
-	installScriptPath := filepath.Join(filepath.Dir(configPath), "scripts", "install-webpanel-tun-sudoers.sh")
-	if _, err := os.Stat(installScriptPath); err != nil {
+	installScriptPath, err := m.resolveRepoScriptPath("install-webpanel-tun-sudoers.sh")
+	if err != nil {
 		return "", fmt.Errorf("install script is missing: %w", err)
 	}
-	askpassScriptPath := filepath.Join(filepath.Dir(configPath), "scripts", "webpanel-sudo-askpass.sh")
+	askpassScriptPath, _ := m.resolveRepoScriptPath("webpanel-sudo-askpass.sh")
 
 	targetUser := strings.TrimSpace(currentUserName())
 	if targetUser == "" {
@@ -759,6 +759,38 @@ func currentUserName() string {
 	}
 
 	return ""
+}
+
+func (m *TunManager) resolveRepoScriptPath(name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("script name is empty")
+	}
+
+	candidates := make([]string, 0, 2)
+	if xrayBin := strings.TrimSpace(m.xrayBin); xrayBin != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(xrayBin), "scripts", name))
+	}
+	if configPath := strings.TrimSpace(m.configPath); configPath != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(configPath), "scripts", name))
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	checked := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		checked = append(checked, candidate)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		} else if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+
+	return "", fmt.Errorf("%s not found in %s", name, strings.Join(checked, ", "))
 }
 
 func (m *TunManager) loadSettings() (*TunFeatureSettings, error) {
@@ -1019,9 +1051,10 @@ func (m *TunManager) inspectLocked(settings *TunFeatureSettings, includeEgressPr
 		status.ElevationReady = true
 	}
 
-	repoHelperPath := filepath.Join(filepath.Dir(m.configPath), "scripts", "webpanel-tun-helper.sh")
-	helperCurrent, helperCompareErr := filesMatch(settings.HelperPath, repoHelperPath)
-	if helperCompareErr == nil {
+	repoHelperPath, repoHelperPathErr := m.resolveRepoScriptPath("webpanel-tun-helper.sh")
+	if repoHelperPathErr != nil {
+		status.Diagnostics = append(status.Diagnostics, "Unable to locate the repo helper for comparison: "+repoHelperPathErr.Error())
+	} else if helperCurrent, helperCompareErr := filesMatch(settings.HelperPath, repoHelperPath); helperCompareErr == nil {
 		status.HelperCurrent = helperCurrent
 	} else if !os.IsNotExist(helperCompareErr) {
 		status.Diagnostics = append(status.Diagnostics, "Unable to compare the installed helper with the repo helper: "+helperCompareErr.Error())
