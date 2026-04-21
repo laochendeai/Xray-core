@@ -1380,6 +1380,64 @@ func TestSubscriptionManagerRefreshSubscriptionReintroducesCandidateMissingNode(
 	}
 }
 
+func TestSubscriptionManagerRefreshSubscriptionDedupesSameBatchLinks(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	handlerStub := &stubHandlerServiceClient{}
+	sm := NewSubscriptionManager(configPath, &GRPCClient{handlerClient: handlerStub}, nil, nil)
+	defer sm.Stop()
+
+	uri, err := GenerateShareLink(ShareLinkRequest{
+		Protocol: "vless",
+		Address:  "dedupe.example.com",
+		Port:     443,
+		UUID:     "66666666-6666-6666-6666-666666666666",
+		Remark:   "dedupe-node",
+		TLS:      "tls",
+		SNI:      "dedupe.example.com",
+	})
+	if err != nil {
+		t.Fatalf("generate share link: %v", err)
+	}
+
+	subID := "sub-dedupe"
+	sm.mu.Lock()
+	sm.state.Subscriptions = []SubscriptionRecord{
+		{
+			ID:         subID,
+			SourceType: SubscriptionSourceManual,
+			Content:    uri + "\n" + uri + "\n",
+			Remark:     "manual duplicate sub",
+		},
+	}
+	sm.mu.Unlock()
+
+	if err := sm.RefreshSubscription(subID); err != nil {
+		t.Fatalf("refresh subscription: %v", err)
+	}
+
+	nodes := sm.ListNodes("")
+	if len(nodes) != 1 {
+		t.Fatalf("expected duplicate links in one refresh to create 1 node, got %d: %#v", len(nodes), nodes)
+	}
+	if nodes[0].Address != "dedupe.example.com" {
+		t.Fatalf("expected deduped node address, got %q", nodes[0].Address)
+	}
+	if len(handlerStub.addedTags) != 1 {
+		t.Fatalf("expected one outbound registration for duplicate links, got %v", handlerStub.addedTags)
+	}
+
+	listed := sm.ListSubscriptions()
+	if len(listed) != 1 {
+		t.Fatalf("expected one subscription, got %d", len(listed))
+	}
+	if listed[0].NodeCount != 1 {
+		t.Fatalf("expected node count 1 for duplicate subscription content, got %d", listed[0].NodeCount)
+	}
+}
+
 func TestSubscriptionManagerUpdateSubscriptionMetadataKeepsNodeHistory(t *testing.T) {
 	t.Parallel()
 
