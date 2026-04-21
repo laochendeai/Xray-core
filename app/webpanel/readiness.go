@@ -419,14 +419,7 @@ func (wp *WebPanel) readinessUpdatesCheck(ctx context.Context) ReadinessCheck {
 		}
 	}
 
-	checkCtx := ctx
-	if checkCtx == nil {
-		checkCtx = context.Background()
-	}
-	checkCtx, cancel := context.WithTimeout(checkCtx, 2*time.Second)
-	defer cancel()
-
-	status := wp.releaseChecker.Check(checkCtx, false)
+	status, _ := wp.releaseChecker.CachedStatus()
 	facts := map[string]interface{}{
 		"status":            status.Status,
 		"source":            status.Source,
@@ -438,7 +431,7 @@ func (wp *WebPanel) readinessUpdatesCheck(ctx context.Context) ReadinessCheck {
 	}
 
 	severity := ReadinessSeverityOK
-	if status.Status == "error" || status.Status == "stale" || status.UpdateAvailable {
+	if status.Status == "unavailable" || status.Status == "error" || status.Status == "stale" || status.UpdateAvailable {
 		severity = ReadinessSeverityWarning
 	}
 

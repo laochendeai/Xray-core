@@ -3,6 +3,8 @@ package webpanel
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -172,6 +174,33 @@ func TestWebPanelReadinessSnapshotSkipsDirectEgressProbe(t *testing.T) {
 	}
 }
 
+func TestWebPanelReadinessUpdatesCheckUsesCacheOnly(t *testing.T) {
+	transport := &countingRoundTripper{}
+	wp := &WebPanel{
+		config: &Config{},
+		releaseChecker: newReleaseChecker(
+			&http.Client{Transport: transport},
+			"https://example.invalid/releases.atom",
+			"test/source",
+			time.Hour,
+		),
+	}
+
+	check := wp.readinessUpdatesCheck(context.Background())
+	if transport.count != 0 {
+		t.Fatalf("expected readiness update check to avoid outbound release fetches, got %d request(s)", transport.count)
+	}
+	if check.Severity != ReadinessSeverityWarning {
+		t.Fatalf("expected unavailable update cache to be warning, got %q", check.Severity)
+	}
+	if status, _ := check.Facts["status"].(string); status != "unavailable" {
+		t.Fatalf("expected unavailable update status, got %#v", check.Facts["status"])
+	}
+	if source, _ := check.Facts["source"].(string); source != "test/source" {
+		t.Fatalf("expected source to round-trip, got %#v", check.Facts["source"])
+	}
+}
+
 func cachedReleaseChecker(status UpdateStatusResponse) *releaseChecker {
 	now := time.Date(2026, 4, 4, 4, 0, 0, 0, time.UTC)
 	return &releaseChecker{
@@ -181,4 +210,13 @@ func cachedReleaseChecker(status UpdateStatusResponse) *releaseChecker {
 		cached:   &status,
 		cachedAt: now,
 	}
+}
+
+type countingRoundTripper struct {
+	count int
+}
+
+func (rt *countingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	rt.count++
+	return nil, fmt.Errorf("unexpected release fetch")
 }

@@ -52,6 +52,6 @@ log "Web build"
 )
 
 log "Web smoke test"
-python3 tests/test_web_smoke.py
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test_web_smoke.py
 
 log "All checks passed"
