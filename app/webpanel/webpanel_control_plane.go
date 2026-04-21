@@ -8,7 +8,7 @@ import (
 
 const (
 	tunEligibleProbeFreshness = 10 * time.Minute
-	tunStableModeDiagnostic   = "Stable mode captures TCP plus UDP/53 and UDP/443 into transparent TUN without rewriting system DNS. General UDP such as unmanaged WebRTC/STUN is not guaranteed on the transparent path; use the hardened IPPure verification browser for acceptance checks."
+	tunStableModeDiagnostic   = "Strict transparent mode captures all non-bypassed IPv4 traffic into the TUN route table, disables IPv6 while enabled, and normalizes remote DNS to encrypted DoH resolvers. Only configured direct routes, local routes, helper/root traffic, and upstream proxy reachability bypass the tunnel."
 )
 
 type tunEligiblePoolSummary struct {

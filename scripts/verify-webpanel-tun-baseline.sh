@@ -17,6 +17,7 @@ This flow verifies:
   - runtime DNS/routing diagnostics and generated runtime config markers
   - one representative protected/direct site while TUN is running
   - one proxy-path probe, plus an HTTP/3 probe when curl supports it
+  - strict IPv4 full-tunnel capture and IPv6 leak prevention while TUN is running
 
 Examples:
   ./scripts/verify-webpanel-tun-baseline.sh --config /path/to/config.json
@@ -461,12 +462,19 @@ write_quic_prereq_json() {
   local http3_supported="$4"
   local http3_exit_code="$5"
 
-  local udp443_capture="false"
-  if command -v ip >/dev/null 2>&1 && ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_UDP_443_RULE_PREF}:.*ipproto udp.* dport 443 .*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
-    udp443_capture="true"
+  local strict_ipv4_capture="false"
+  if command -v ip >/dev/null 2>&1 && ip -4 rule show | grep -Eq "^${WEBPANEL_CAPTURE_IPV4_RULE_PREF}:.*lookup ${WEBPANEL_CAPTURE_ROUTE_TABLE_ID}\b"; then
+    strict_ipv4_capture="true"
   fi
 
-  python3 - "$result_json" "$running_status_json" "$proxy_probe_json" "$udp443_capture" "$http3_supported" "$http3_exit_code" <<'PY'
+  local ipv6_leak_prevented="true"
+  if [[ -d /proc/sys/net/ipv6/conf ]]; then
+    if ! find /proc/sys/net/ipv6/conf -name disable_ipv6 -type f -exec sh -c 'for path do [ "$(cat "$path" 2>/dev/null)" = "1" ] || exit 1; done' sh {} +; then
+      ipv6_leak_prevented="false"
+    fi
+  fi
+
+  python3 - "$result_json" "$running_status_json" "$proxy_probe_json" "$strict_ipv4_capture" "$ipv6_leak_prevented" "$http3_supported" "$http3_exit_code" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -474,17 +482,19 @@ from pathlib import Path
 result_path = Path(sys.argv[1])
 status = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 proxy_probe = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
-udp443_capture = sys.argv[4] == "true"
-http3_supported = sys.argv[5] == "true"
-http3_exit_code = int(sys.argv[6])
+strict_ipv4_capture = sys.argv[4] == "true"
+ipv6_leak_prevented = sys.argv[5] == "true"
+http3_supported = sys.argv[6] == "true"
+http3_exit_code = int(sys.argv[7])
 
 proxy_egress = status.get("proxyEgress") or {}
 proxy_probe_exit_code = proxy_probe.get("exitCode")
 proxy_probe_passed = int(proxy_probe_exit_code if proxy_probe_exit_code is not None else 1) == 0
-prerequisites_passed = udp443_capture and proxy_egress.get("status") == "dynamic"
+prerequisites_passed = strict_ipv4_capture and ipv6_leak_prevented and proxy_egress.get("status") == "dynamic"
 http3_passed = (not http3_supported) or http3_exit_code == 0
 payload = {
-    "udp443CaptureRuleActive": udp443_capture,
+    "strictIpv4CaptureRuleActive": strict_ipv4_capture,
+    "ipv6LeakPrevented": ipv6_leak_prevented,
     "proxyEgressStatus": proxy_egress.get("status"),
     "proxyProbeExitCode": proxy_probe.get("exitCode"),
     "proxyProbePassed": proxy_probe_passed,
@@ -495,6 +505,47 @@ payload = {
 }
 payload["passed"] = prerequisites_passed
 result_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+assert_ipv6_disable_state_restored() {
+  local before_file="$SNAPSHOT_BEFORE/ipv6-disable-state.txt"
+  local restored_file="$SNAPSHOT_RESTORED/ipv6-disable-state.txt"
+
+  if [[ ! -f "$before_file" || ! -f "$restored_file" ]]; then
+    warn "IPv6 disable-state snapshots are unavailable; skipping restore comparison"
+    return 0
+  fi
+
+  python3 - "$before_file" "$restored_file" "$WEBPANEL_TUN_INTERFACE" <<'PY'
+import sys
+from pathlib import Path
+
+before_path = Path(sys.argv[1])
+restored_path = Path(sys.argv[2])
+tun_interface = sys.argv[3]
+
+def load_state(path):
+    lines = [line.strip() for line in path.read_text(encoding="utf-8", errors="replace").splitlines()]
+    state = {}
+    for index in range(0, len(lines) - 1, 2):
+        proc_path = Path(lines[index])
+        value = lines[index + 1]
+        if proc_path.name != "disable_ipv6":
+            continue
+        iface = proc_path.parent.name
+        if iface == tun_interface:
+            continue
+        state[iface] = value
+    return state
+
+before = load_state(before_path)
+restored = load_state(restored_path)
+if before != restored:
+    print("IPv6 disable state was not restored after restore-clean", file=sys.stderr)
+    print(f"before={before}", file=sys.stderr)
+    print(f"restored={restored}", file=sys.stderr)
+    sys.exit(1)
 PY
 }
 
@@ -614,7 +665,8 @@ lines = [
     f"SUMMARY routing runtime_passed={runtime_checks.get('passed')} default_proxy_diag={default_proxy_diag}",
     f"SUMMARY protected_target url={protected_url} exit={protected_target_probe.get('exitCode')} http_code={protected_target_probe.get('httpCode')} target_remote_ip={protected_target_probe.get('targetRemoteIp', '-')}",
     f"SUMMARY proxy_probe target={proxy_target} exit={proxy_probe.get('exitCode')} passed={proxy_probe.get('proxyProbePassed', proxy_probe.get('exitCode') == 0)} probe_url={proxy_probe_url}",
-    f"SUMMARY quic supported={quic_probe.get('http3Supported')} http3_passed={quic_probe.get('http3Passed')} prerequisites_passed={quic_probe.get('prerequisitesPassed')}",
+    f"SUMMARY tunnel strict_ipv4_capture={quic_probe.get('strictIpv4CaptureRuleActive')} ipv6_leak_prevented={quic_probe.get('ipv6LeakPrevented')} prerequisites_passed={quic_probe.get('prerequisitesPassed')}",
+    f"SUMMARY quic supported={quic_probe.get('http3Supported')} http3_passed={quic_probe.get('http3Passed')}",
     f"SUMMARY restored running={restored.get('running')} machineState={restored.get('machineState')} reason={restored.get('lastStateReason')}",
     f"SUMMARY evidence before={snapshot_before} running={snapshot_running} restored={snapshot_restored}",
     f"SUMMARY summary_json={summary_json_path}",
@@ -788,6 +840,7 @@ wait_for_running_state "false" 30 || die "Timed out waiting for restore-clean to
 api_get_checked "/api/v1/tun/status" "$RESTORED_STATUS_JSON"
 SNAPSHOT_RESTORED="$(webpanel_capture_snapshot "$TOKEN" "$OUTPUT_DIR" "restored-$(date +%Y%m%d-%H%M%S)")"
 log "captured restored snapshot: $SNAPSHOT_RESTORED"
+assert_ipv6_disable_state_restored
 
 RESTORED_RUNNING="$(json_get "$RESTORED_STATUS_JSON" "running" 2>/dev/null || true)"
 RESTORED_STATE="$(json_get "$RESTORED_STATUS_JSON" "machineState" 2>/dev/null || true)"

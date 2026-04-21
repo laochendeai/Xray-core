@@ -151,8 +151,9 @@ func TestWebPanelStartTransparentModeBlocksWhenEligiblePoolBelowMinimumEvenIfAct
 
 	diagnostics := strings.Join(status.Diagnostics, "\n")
 	for _, token := range []string{
-		"Stable mode captures TCP plus UDP/53 and UDP/443",
-		"unmanaged WebRTC/STUN is not guaranteed",
+		"Strict transparent mode captures all non-bypassed IPv4 traffic",
+		"disables IPv6 while enabled",
+		"encrypted DoH resolvers",
 		"Transparent-mode eligible nodes: 1 / active 2 / minimum required 2.",
 		"Excluded active nodes: hysteria2=1",
 		"Transparent mode only starts when the stable eligible pool meets the minimum size.",
@@ -482,7 +483,7 @@ func TestTunStatusSnapshotIncludesRoutingDiagnostics(t *testing.T) {
 	if cn.DNSPath != "dns-cn" || cn.Route != "direct" {
 		t.Fatalf("unexpected cn direct diagnostic: %#v", cn)
 	}
-	if !strings.Contains(cn.Resolver, "223.5.5.5") {
+	if !strings.Contains(cn.Resolver, "https://dns.alidns.com/dns-query") {
 		t.Fatalf("expected cn resolver list, got %q", cn.Resolver)
 	}
 
@@ -492,7 +493,7 @@ func TestTunStatusSnapshotIncludesRoutingDiagnostics(t *testing.T) {
 	if remote.DNSPath != "dns-remote" || !strings.Contains(remote.Route, "node-pool-active") {
 		t.Fatalf("unexpected remote routing diagnostic: %#v", remote)
 	}
-	if remote.Resolver != "1.1.1.1" {
+	if remote.Resolver != "https://cloudflare-dns.com/dns-query" {
 		t.Fatalf("expected remote resolver from tun settings, got %q", remote.Resolver)
 	}
 

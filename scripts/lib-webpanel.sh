@@ -99,9 +99,10 @@ PY
   WEBPANEL_BYPASS_ROUTE_TABLE_ID="${XRAY_TUN_ROUTE_TABLE_ID:-2027}"
   WEBPANEL_BYPASS_RULE_PREF="${XRAY_TUN_BYPASS_RULE_PREF:-12000}"
   WEBPANEL_CAPTURE_ROUTE_TABLE_ID="${XRAY_TUN_CAPTURE_ROUTE_TABLE_ID:-2028}"
-  WEBPANEL_CAPTURE_DNS_RULE_PREF="${XRAY_TUN_CAPTURE_DNS_RULE_PREF:-12010}"
-  WEBPANEL_CAPTURE_UDP_443_RULE_PREF="${XRAY_TUN_CAPTURE_UDP_443_RULE_PREF:-12015}"
-  WEBPANEL_CAPTURE_TCP_RULE_PREF="${XRAY_TUN_CAPTURE_TCP_RULE_PREF:-12020}"
+  WEBPANEL_CAPTURE_IPV4_RULE_PREF="${XRAY_TUN_CAPTURE_IPV4_RULE_PREF:-12020}"
+  WEBPANEL_LEGACY_CAPTURE_DNS_RULE_PREF="${XRAY_TUN_CAPTURE_DNS_RULE_PREF:-12010}"
+  WEBPANEL_LEGACY_CAPTURE_UDP_443_RULE_PREF="${XRAY_TUN_CAPTURE_UDP_443_RULE_PREF:-12015}"
+  WEBPANEL_LEGACY_CAPTURE_TCP_RULE_PREF="${XRAY_TUN_CAPTURE_TCP_RULE_PREF:-12020}"
 }
 
 json_get() {
@@ -285,10 +286,14 @@ webpanel_capture_snapshot() {
   if command -v ip >/dev/null 2>&1; then
     ip link show >"$snapshot_dir/ip-link.txt" 2>&1 || true
     ip -4 rule show >"$snapshot_dir/ip-rule.txt" 2>&1 || true
+    ip -6 rule show >"$snapshot_dir/ip6-rule.txt" 2>&1 || true
     ip route show >"$snapshot_dir/ip-route.txt" 2>&1 || true
     ip route show table main >"$snapshot_dir/ip-route-main.txt" 2>&1 || true
     ip route show table "$WEBPANEL_BYPASS_ROUTE_TABLE_ID" >"$snapshot_dir/ip-route-bypass.txt" 2>&1 || true
     ip route show table "$WEBPANEL_CAPTURE_ROUTE_TABLE_ID" >"$snapshot_dir/ip-route-capture.txt" 2>&1 || true
+  fi
+  if [[ -d /proc/sys/net/ipv6/conf ]]; then
+    find /proc/sys/net/ipv6/conf -name disable_ipv6 -type f -print -exec cat {} \; >"$snapshot_dir/ipv6-disable-state.txt" 2>&1 || true
   fi
   if command -v resolvectl >/dev/null 2>&1; then
     resolvectl status >"$snapshot_dir/resolvectl-status.txt" 2>&1 || true

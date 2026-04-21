@@ -48,12 +48,12 @@ var (
 		"full:localhost",
 	}
 	defaultTunDNS = []string{
-		"1.1.1.1",
-		"8.8.8.8",
+		"https://cloudflare-dns.com/dns-query",
+		"https://dns.google/dns-query",
 	}
 	defaultTunChinaDNS = []string{
-		"223.5.5.5",
-		"119.29.29.29",
+		"https://dns.alidns.com/dns-query",
+		"https://doh.pub/dns-query",
 	}
 )
 
@@ -1757,7 +1757,7 @@ func buildTunDNSConfig(settings *TunFeatureSettings) map[string]interface{} {
 		}
 	}
 
-	for _, address := range uniqStrings(settings.RemoteDNS) {
+	for _, address := range uniqStrings(normalizeTunRemoteDNS(settings.RemoteDNS)) {
 		servers = append(servers, map[string]interface{}{
 			"address": normalizeTunResolverAddress(address),
 			"tag":     "dns-remote",
@@ -2194,13 +2194,73 @@ func normalizeTunDomainRule(value string) string {
 func normalizeTunRemoteDNS(values []string) []string {
 	normalized := make([]string, 0, len(values))
 	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
+		next := normalizeTunEncryptedResolver(value)
+		if next == "" {
 			continue
 		}
-		normalized = append(normalized, trimmed)
+		normalized = append(normalized, next)
 	}
 	return uniqStrings(normalized)
+}
+
+func normalizeTunEncryptedResolver(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.HasPrefix(lower, "https://"):
+		return trimmed
+	case strings.HasPrefix(lower, "https+local://"):
+		return trimmed
+	case strings.HasPrefix(lower, "quic+local://"):
+		return trimmed
+	case strings.HasPrefix(lower, "tcp://"):
+		trimmed = trimmed[len("tcp://"):]
+	case strings.HasPrefix(lower, "tcp+local://"):
+		trimmed = trimmed[len("tcp+local://"):]
+	case strings.HasPrefix(lower, "udp://"):
+		trimmed = trimmed[len("udp://"):]
+	case strings.HasPrefix(lower, "udp+local://"):
+		trimmed = trimmed[len("udp+local://"):]
+	case strings.Contains(lower, "://"):
+		parts := strings.SplitN(trimmed, "://", 2)
+		trimmed = parts[len(parts)-1]
+	}
+
+	host := strings.Trim(strings.TrimSpace(trimmed), "/")
+	host = normalizeTunEncryptedResolverHost(host)
+	switch host {
+	case "1.1.1.1", "1.0.0.1":
+		return "https://cloudflare-dns.com/dns-query"
+	case "8.8.8.8", "8.8.4.4":
+		return "https://dns.google/dns-query"
+	case "9.9.9.9", "149.112.112.112":
+		return "https://dns.quad9.net/dns-query"
+	case "223.5.5.5", "223.6.6.6":
+		return "https://dns.alidns.com/dns-query"
+	case "119.29.29.29":
+		return "https://doh.pub/dns-query"
+	default:
+		if parsed := stdnet.ParseIP(strings.Trim(host, "[]")); parsed != nil && strings.Contains(parsed.String(), ":") {
+			return "https://[" + parsed.String() + "]/dns-query"
+		}
+		return "https://" + host + "/dns-query"
+	}
+}
+
+func normalizeTunEncryptedResolverHost(value string) string {
+	host := strings.TrimSpace(value)
+	host = strings.TrimPrefix(host, "//")
+	if idx := strings.IndexAny(host, "/?#"); idx >= 0 {
+		host = host[:idx]
+	}
+	if splitHost, _, err := stdnet.SplitHostPort(host); err == nil {
+		host = splitHost
+	}
+	return strings.Trim(host, "[]")
 }
 
 func stringSliceFromAny(raw interface{}) []string {
