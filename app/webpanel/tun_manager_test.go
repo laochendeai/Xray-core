@@ -521,6 +521,65 @@ func TestBuildTunRuntimeConfigDropsWideBaseDirectRulesButKeepsProtectedLocalEntr
 	}
 }
 
+func TestBuildTunRuntimeConfigDoesNotInjectBroadChinaDirectRules(t *testing.T) {
+	t.Parallel()
+
+	assetDir := t.TempDir()
+	binPath := filepath.Join(assetDir, "xray-test")
+	if err := os.WriteFile(binPath, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("write binary stub: %v", err)
+	}
+	for _, assetName := range []string{"geosite.dat", "geoip.dat"} {
+		if err := os.WriteFile(filepath.Join(assetDir, assetName), []byte("stub"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", assetName, err)
+		}
+	}
+
+	baseConfig := []byte(`{
+  "outbounds": [
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "routing": {
+    "rules": []
+  }
+}`)
+
+	output, err := buildTunRuntimeConfig(baseConfig, &TunFeatureSettings{
+		BinaryPath:     binPath,
+		InterfaceName:  "xray0",
+		MTU:            1500,
+		RemoteDNS:      []string{"https://cloudflare-dns.com/dns-query"},
+		ProtectCIDRs:   []string{"127.0.0.0/8"},
+		ProtectDomains: []string{"full:localhost"},
+	}, []NodeRecord{{ID: "node-1", URI: mustGenerateTunTestURI(t, "203.0.113.21")}})
+	if err != nil {
+		t.Fatalf("build tun runtime config: %v", err)
+	}
+
+	rendered := string(output)
+	for _, forbidden := range []string{
+		`"geosite:cn"`,
+		`"geoip:cn"`,
+		`"dns-cn"`,
+		`"https://dns.alidns.com/dns-query"`,
+		`"https://doh.pub/dns-query"`,
+	} {
+		if strings.Contains(rendered, forbidden) {
+			t.Fatalf("did not expect runtime config to contain %q\n%s", forbidden, rendered)
+		}
+	}
+	for _, required := range []string{
+		`"tag": "dns-remote"`,
+		`"balancerTag": "node-pool-active"`,
+		`"full:localhost"`,
+		`"127.0.0.0/8"`,
+	} {
+		if !strings.Contains(rendered, required) {
+			t.Fatalf("expected runtime config to contain %q\n%s", required, rendered)
+		}
+	}
+}
+
 func TestNormalizeTunDestinationBindingDedupeAndFallbackModes(t *testing.T) {
 	t.Parallel()
 

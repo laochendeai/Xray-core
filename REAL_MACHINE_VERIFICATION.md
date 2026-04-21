@@ -96,7 +96,7 @@ The fallback rehearsal remains a separate, extended verification and is not part
 
 ## IPPure Privacy Verification
 
-Use this when validating the privacy diagnostics and external IPPure result on the real machine. Strict transparent mode captures all non-bypassed IPv4 traffic through the TUN route table, disables IPv6 while enabled, and normalizes remote DNS to encrypted DoH resolvers so normal browser IPv6/DNS cannot bypass the tunnel. Browser fingerprint uniqueness still requires a browser-profile policy; the repository IPPure script enables a randomized fingerprint profile and disables WebRTC APIs by default for that acceptance path.
+Use this when validating the privacy diagnostics and external IPPure result on the real machine. Strict transparent mode captures all non-bypassed IPv4 traffic through the TUN route table, disables IPv6 while enabled, and normalizes remote DNS to encrypted DoH resolvers so normal browser IPv6/DNS cannot bypass the tunnel. Broad China direct routing is not part of strict privacy mode: only explicit protected allowlist entries may stay direct. Daily Chrome/Chromium-family browsers also need the managed WebRTC policy installed; randomized fingerprint spoofing still requires the controlled browser profile used by the repository IPPure script.
 
 1. Rebuild and restart the local runtime from this repo:
    ```bash
@@ -104,13 +104,18 @@ Use this when validating the privacy diagnostics and external IPPure result on t
    ./xray run -c /path/to/config.json
    ```
 2. Confirm the local SOCKS inbound is reachable. The default development config uses `127.0.0.1:11080`.
-3. Run the hardened IPPure capture:
+3. Install daily-browser privacy policy and fully restart Chrome/Chromium-family browsers:
+   ```bash
+   sudo ./scripts/install-browser-privacy-policy.sh
+   ```
+   Confirm `WebRtcIPHandling=disable_non_proxied_udp` and `DnsOverHttpsMode=off` on `chrome://policy` or `edge://policy`.
+4. Run the hardened IPPure capture:
    ```bash
    IPPURE_OUTPUT_DIR=runtime/ippure-verification node scripts/verify-ippure.mjs
    ```
-4. If visual confirmation is needed, run the same controlled browser non-headless:
+5. If visual confirmation or manual IPPure interaction is needed, run the same controlled browser non-headless and keep it open:
    ```bash
-   IPPURE_HEADLESS=0 IPPURE_OUTPUT_DIR=runtime/ippure-visible node scripts/verify-ippure.mjs
+   IPPURE_HEADLESS=0 IPPURE_KEEP_OPEN=1 IPPURE_OUTPUT_DIR=runtime/ippure-visible node scripts/verify-ippure.mjs
    ```
 
 The script automatically prefers a localhost SOCKS inbound when `IPPURE_PROXY_SERVER` is not set. It checks `IPPURE_CONFIG`, then `dev-config.current-nodes.json` in the current repo, then the config path from a currently running `xray run -c ...` process. Override it explicitly for single-node validation:
@@ -123,10 +128,11 @@ Pass conditions for issue-style verification:
 
 - `summary.json` records a non-empty `proxyServer` and a `proxySource` such as `env`, `cwd-config:*`, or `running-process:*`.
 - `summary.json` records `randomFingerprint=true`, `disableWebRTC=true`, and a non-empty `fingerprintProfile` unless explicitly disabled by environment variables.
+- The generated runtime TUN config contains no `geosite:cn`, `geoip:cn`, or `dns-cn` direct rule.
 - IPPure WebRTC evidence does not expose the machine's direct public IP.
 - DNS evidence does not show local/private ISP resolver leakage on the unmanaged host path.
 - Any remaining IPPure purity score limitation is attributed to the selected node exit and belongs in the clean-node follow-up, not in the WebRTC/DNS leak closure.
-- A normal browser IPPure run should not expose the machine's direct IPv4 or any IPv6 address while transparent mode is enabled. If it does, treat that as a TUN/helper regression rather than a node-purity issue.
+- A normal browser IPPure run after policy installation should not expose the machine's direct IPv4, direct WebRTC/STUN path, or any IPv6 address while transparent mode is enabled. If it does, treat that as a TUN/helper/browser-policy regression rather than a node-purity issue.
 
 ## Verification Scripts
 

@@ -31,6 +31,10 @@ bash scripts/check-locale-sync.sh
 log "TUN installer normalization"
 bash scripts/test-webpanel-tun-installer-normalization.sh
 
+log "Browser privacy policy installer syntax"
+bash -n scripts/install-browser-privacy-policy.sh
+node --check scripts/verify-ippure.mjs
+
 log "Local-state guard"
 bash scripts/check-local-state-guard.sh
 

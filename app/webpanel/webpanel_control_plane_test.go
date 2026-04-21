@@ -440,19 +440,12 @@ func TestTunStatusSnapshotIncludesRoutingDiagnostics(t *testing.T) {
 		t.Fatalf("write binary stub: %v", err)
 	}
 
-	// Ensure geosite-based CN direct diagnostics are included for the active binary-path lookup.
-	assetPath := filepath.Join(filepath.Dir(binPath), "geosite.dat")
-	if err := os.WriteFile(assetPath, []byte("stub"), 0o644); err != nil {
-		t.Fatalf("write geosite asset: %v", err)
-	}
-
 	status := wp.tunStatusSnapshot()
 	if status == nil {
 		t.Fatal("expected tun status")
 	}
 
 	var protected *TunRoutingDiagnostic
-	var cn *TunRoutingDiagnostic
 	var remote *TunRoutingDiagnostic
 
 	for i := range status.RoutingDiagnostics {
@@ -460,8 +453,6 @@ func TestTunStatusSnapshotIncludesRoutingDiagnostics(t *testing.T) {
 		switch item.Category {
 		case "protected_direct_domains":
 			protected = item
-		case "cn_direct_domains":
-			cn = item
 		case "default_proxy_domains":
 			remote = item
 		}
@@ -475,16 +466,6 @@ func TestTunStatusSnapshotIncludesRoutingDiagnostics(t *testing.T) {
 	}
 	if len(protected.Domains) == 0 || protected.Domains[0] != "full:localhost" {
 		t.Fatalf("expected protected domains to include full:localhost, got %#v", protected.Domains)
-	}
-
-	if cn == nil {
-		t.Fatal("expected cn_direct_domains routing diagnostic")
-	}
-	if cn.DNSPath != "dns-cn" || cn.Route != "direct" {
-		t.Fatalf("unexpected cn direct diagnostic: %#v", cn)
-	}
-	if !strings.Contains(cn.Resolver, "https://dns.alidns.com/dns-query") {
-		t.Fatalf("expected cn resolver list, got %q", cn.Resolver)
 	}
 
 	if remote == nil {
@@ -501,13 +482,16 @@ func TestTunStatusSnapshotIncludesRoutingDiagnostics(t *testing.T) {
 	for _, token := range []string{
 		"DNS/routing decision [protected_direct_domains]",
 		"dns=dns-direct-local",
-		"DNS/routing decision [cn_direct_domains]",
-		"dns=dns-cn",
 		"DNS/routing decision [default_proxy_domains]",
 		"dns=dns-remote",
 	} {
 		if !strings.Contains(diagnostics, token) {
 			t.Fatalf("expected diagnostics to contain %q\n%s", token, diagnostics)
+		}
+	}
+	for _, token := range []string{"cn_direct_domains", "dns=dns-cn"} {
+		if strings.Contains(diagnostics, token) {
+			t.Fatalf("did not expect diagnostics to contain %q\n%s", token, diagnostics)
 		}
 	}
 

@@ -152,7 +152,7 @@ make build-dev
 
 - 这是一个**解释页**，不是独立 DNS 编辑器
 - 展示主配置文件里的 `dns` 段、静态 Hosts 和查询策略
-- 展示透明模式下国内直连 / 国外代理的 DNS 分流逻辑
+- 展示透明模式下显式保护直连 / 默认代理的 DNS 分流逻辑
 - 基础 DNS 配置仍在 `/config` 页面维护
 - 透明模式使用的远端 DNS 列表在 `/node-pool` 页面维护，运行时会把裸 IP 或 tcp/udp DNS 自动规范化为 DoH 加密解析器
 
@@ -160,8 +160,9 @@ make build-dev
 
 - 对照浏览器侧证据与当前 TUN、DNS、节点池状态，检查 IP 定位、WebRTC、DNS、指纹、IP 纯净度和节点池去重
 - 页面本身负责检测和解释；网络层防护依赖严格透明 TUN，全隧道模式会接管非旁路 IPv4、启用期间禁用 IPv6，并把远端 DNS 规范化为 DoH 加密解析
+- 日常 Chrome/Chromium-family 浏览器需要先安装托管策略：`sudo ./scripts/install-browser-privacy-policy.sh`，再完全重启浏览器并在 `chrome://policy` 检查策略生效
 - IPPure 验收以仓库脚本为准：在仓库根目录运行 `node scripts/verify-ippure.mjs`
-- 该脚本默认从 `IPPURE_CONFIG`、当前仓库配置或正在运行的 `xray run -c ...` 配置中发现本地 SOCKS 入站，并启用加固浏览器策略、关闭 WebRTC API、随机化指纹 profile；需要可见浏览器时运行 `IPPURE_HEADLESS=0 node scripts/verify-ippure.mjs`
+- 该脚本默认从 `IPPURE_CONFIG`、当前仓库配置或正在运行的 `xray run -c ...` 配置中发现本地 SOCKS 入站，并启用加固浏览器策略、关闭 WebRTC API、随机化指纹 profile；需要可见浏览器时运行 `IPPURE_HEADLESS=0 IPPURE_KEEP_OPEN=1 node scripts/verify-ippure.mjs`
 - 普通浏览器在透明 TUN 开启后不应暴露直连 IPv4、IPv6、DNS 或 WebRTC/STUN 网络路径；若仍暴露直连 IP，应按 TUN/helper 回归处理。浏览器指纹唯一性仍属于浏览器配置或 profile 策略问题
 
 ### 实时监控 (`/monitor`)

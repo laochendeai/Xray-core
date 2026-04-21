@@ -432,7 +432,7 @@ checks = {
     "hasRemoteDnsServer": remote_dns_present(),
     "hasProtectedRoutingDiagnostic": ("protected_direct_domains" in diagnostics) if protect_domains else True,
     "hasDefaultProxyDiagnostic": "default_proxy_domains" in diagnostics,
-    "hasCnRoutingDiagnostic": "cn_direct_domains" in diagnostics,
+    "hasNoCnRoutingDiagnostic": "cn_direct_domains" not in diagnostics,
 }
 
 required = [
@@ -444,6 +444,7 @@ required = [
     "hasRemoteDnsServer",
     "hasProtectedRoutingDiagnostic",
     "hasDefaultProxyDiagnostic",
+    "hasNoCnRoutingDiagnostic",
 ]
 
 payload = {

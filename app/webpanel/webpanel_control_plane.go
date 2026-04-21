@@ -307,7 +307,7 @@ func (wp *WebPanel) appendTunRoutingDiagnostics(status *TunStatus) {
 }
 
 func buildTunRoutingDiagnostics(settings *TunFeatureSettings) []TunRoutingDiagnostic {
-	diagnostics := make([]TunRoutingDiagnostic, 0, 3)
+	diagnostics := make([]TunRoutingDiagnostic, 0, 2)
 
 	if len(settings.ProtectDomains) > 0 {
 		diagnostics = append(diagnostics, TunRoutingDiagnostic{
@@ -320,23 +320,12 @@ func buildTunRoutingDiagnostics(settings *TunFeatureSettings) []TunRoutingDiagno
 		})
 	}
 
-	if runtimeAssetExists(settings, "geosite.dat") {
-		diagnostics = append(diagnostics, TunRoutingDiagnostic{
-			Category: "cn_direct_domains",
-			DNSPath:  "dns-cn",
-			Resolver: strings.Join(defaultTunChinaDNS, ", "),
-			Route:    "direct",
-			Reason:   "Domains matched by geosite:cn resolve via China DNS and are routed direct.",
-			Domains:  []string{"geosite:cn"},
-		})
-	}
-
 	diagnostics = append(diagnostics, TunRoutingDiagnostic{
 		Category: "default_proxy_domains",
 		DNSPath:  "dns-remote",
 		Resolver: strings.Join(settings.RemoteDNS, ", "),
 		Route:    "proxy(node-pool-active)",
-		Reason:   "Domains not matched by protected direct rules or geosite:cn are resolved by remote DNS and routed through the active node pool.",
+		Reason:   "Domains not matched by protected direct rules are resolved by remote DNS and routed through the active node pool.",
 	})
 
 	return diagnostics

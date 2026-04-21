@@ -280,6 +280,7 @@ const navigationTimeoutMs = Number.parseInt(process.env.IPPURE_NAV_TIMEOUT_MS ||
 const networkIdleTimeoutMs = Number.parseInt(process.env.IPPURE_NETWORK_IDLE_TIMEOUT_MS || "10000", 10);
 const settleTimeoutMs = Number.parseInt(process.env.IPPURE_SETTLE_TIMEOUT_MS || "3000", 10);
 const headless = parseBooleanEnv(process.env.IPPURE_HEADLESS, true);
+const keepOpen = parseBooleanEnv(process.env.IPPURE_KEEP_OPEN, false);
 const explicitProxyServer = process.env.IPPURE_PROXY_SERVER || "";
 const detectedProxy = explicitProxyServer ? { server: explicitProxyServer, source: "env" } : await proxyFromConfig();
 const proxyServer = detectedProxy.server;
@@ -291,6 +292,13 @@ const browser = await chromium.launch({
 });
 
 const results = [];
+let browserClosed = false;
+async function closeBrowser() {
+  if (browserClosed) return;
+  browserClosed = true;
+  await browser.close();
+}
+
 try {
   const context = await browser.newContext({
     viewport: fingerprintProfile?.viewport || { width: 1440, height: 1100 },
@@ -447,8 +455,9 @@ try {
     }
     results.push({ ...result, finishedAt: new Date().toISOString() });
   }
-} finally {
-  await browser.close();
+} catch (error) {
+  await closeBrowser();
+  throw error;
 }
 
 const summary = {
@@ -457,6 +466,7 @@ const summary = {
   randomFingerprint,
   disableWebRTC,
   headless,
+  keepOpen: keepOpen && !headless,
   proxyServer: proxyServer ? proxyServer.replace(/\/\/.*@/, "//***@") : "",
   proxySource: detectedProxy.source,
   fingerprintProfile: fingerprintProfile
@@ -481,11 +491,23 @@ await writeFile(path.join(outputDir, "summary.json"), JSON.stringify(summary, nu
 
 const failed = results.filter((result) => result.status === "error");
 console.log(`proxy: ${proxyServer || "none"} (${detectedProxy.source})`);
-console.log(`hardened: ${hardenBrowser ? "yes" : "no"}, randomFingerprint: ${randomFingerprint ? "yes" : "no"}, webRTCDisabled: ${disableWebRTC ? "yes" : "no"}, headless: ${headless ? "yes" : "no"}`);
+console.log(`hardened: ${hardenBrowser ? "yes" : "no"}, randomFingerprint: ${randomFingerprint ? "yes" : "no"}, webRTCDisabled: ${disableWebRTC ? "yes" : "no"}, headless: ${headless ? "yes" : "no"}, keepOpen: ${keepOpen && !headless ? "yes" : "no"}`);
 for (const result of results) {
   console.log(`${result.name}: ${result.status} ${result.title || ""}`.trim());
   if (result.error) console.log(`  ${result.error}`);
 }
 if (failed.length > 0) {
   process.exitCode = 1;
+}
+
+if (keepOpen && !headless) {
+  console.log("IPPURE_KEEP_OPEN=1: the hardened browser remains open. Press Ctrl+C to close it.");
+  await new Promise((resolve) => {
+    const finish = () => resolve();
+    browser.once("disconnected", finish);
+    process.once("SIGINT", finish);
+  });
+  await closeBrowser();
+} else {
+  await closeBrowser();
 }
