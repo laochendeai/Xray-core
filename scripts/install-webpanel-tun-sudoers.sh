@@ -85,23 +85,7 @@ install -o root -g root -m 0755 "$XRAY_SRC" "$XRAY_DST"
 
 config_owner="$(stat -c '%u:%g' "$CONFIG_PATH")"
 
-python3 - "$CONFIG_PATH" "$HELPER_DST" "$XRAY_DST" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-config_path = Path(sys.argv[1])
-helper_dst = sys.argv[2]
-xray_dst = sys.argv[3]
-
-data = json.loads(config_path.read_text(encoding="utf-8"))
-webpanel = data.setdefault("webpanel", {})
-tun = webpanel.setdefault("tun", {})
-tun["helperPath"] = helper_dst
-tun["binaryPath"] = xray_dst
-tun["useSudo"] = True
-config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PY
+python3 "$SCRIPT_DIR/normalize-webpanel-tun-config.py" "$CONFIG_PATH" "$HELPER_DST" "$XRAY_DST"
 
 chown "$config_owner" "$CONFIG_PATH"
 
