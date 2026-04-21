@@ -8,7 +8,7 @@ import (
 
 const (
 	tunEligibleProbeFreshness = 10 * time.Minute
-	tunStableModeDiagnostic   = "Stable mode captures TCP plus UDP/53 and UDP/443 into transparent TUN without rewriting system DNS; other UDP traffic stays on the main route to preserve local-network stability."
+	tunStableModeDiagnostic   = "Stable mode captures TCP plus UDP/53 and UDP/443 into transparent TUN without rewriting system DNS. General UDP such as unmanaged WebRTC/STUN is not guaranteed on the transparent path; use the hardened IPPure verification browser for acceptance checks."
 )
 
 type tunEligiblePoolSummary struct {

@@ -156,6 +156,14 @@ make build-dev
 - 基础 DNS 配置仍在 `/config` 页面维护
 - 透明模式使用的远端 DNS 列表在 `/node-pool` 页面维护
 
+### 隐私诊断 (`/privacy`)
+
+- 对照浏览器侧证据与当前 TUN、DNS、节点池状态，检查 IP 定位、WebRTC、DNS、指纹、IP 纯净度和节点池去重
+- 页面本身只负责检测和解释，不能强制修改普通浏览器的 WebRTC、DNS 或指纹策略
+- IPPure 验收以仓库脚本为准：在仓库根目录运行 `node scripts/verify-ippure.mjs`
+- 该脚本默认从 `IPPURE_CONFIG`、当前仓库配置或正在运行的 `xray run -c ...` 配置中发现本地 SOCKS 入站，并启用加固浏览器策略；需要可见浏览器时运行 `IPPURE_HEADLESS=0 node scripts/verify-ippure.mjs`
+- 普通未托管的日常浏览器即使处在透明 TUN 下，也可能暴露 WebRTC/STUN 或浏览器指纹信号，不能作为仓库验收结果
+
 ### 实时监控 (`/monitor`)
 
 - **流量监控**：WebSocket 实时速度折线图

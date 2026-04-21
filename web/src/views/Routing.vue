@@ -117,16 +117,35 @@ const testForm = ref({
   inboundTag: ''
 })
 
+function routingRuleIdentifier(row: any) {
+  return String(row.ruleTag || row.tag || '').trim()
+}
+
+function routingRuleDisplay(row: any, key: 'tag' | 'ruleTag' | 'effective') {
+  const value = key === 'effective' ? routingRuleIdentifier(row) : String(row[key] || '').trim()
+  return value || t('routing.missingTag')
+}
+
 const ruleColumns: DataTableColumns = [
-  { title: 'Tag', key: 'tag' },
-  { title: t('routing.ruleTag'), key: 'ruleTag' },
+  {
+    title: t('routing.effectiveTag'),
+    key: 'effectiveTag',
+    render: (row: any) => routingRuleDisplay(row, 'effective')
+  },
+  {
+    title: t('routing.ruleTag'),
+    key: 'ruleTag',
+    render: (row: any) => routingRuleDisplay(row, 'ruleTag')
+  },
   {
     title: t('common.actions'), key: 'actions',
     render(row: any) {
+      const tag = routingRuleIdentifier(row)
       return h(NPopconfirm, {
-        onPositiveClick: () => handleDeleteRule(row.ruleTag || row.tag)
+        disabled: !tag,
+        onPositiveClick: () => handleDeleteRule(tag)
       }, {
-        trigger: () => h(NButton, { size: 'small', type: 'error' }, { default: () => t('common.delete') }),
+        trigger: () => h(NButton, { size: 'small', type: 'error', disabled: !tag }, { default: () => t('common.delete') }),
         default: () => t('common.confirm') + '?'
       })
     }

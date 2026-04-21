@@ -8,6 +8,9 @@
     <n-alert type="info" :title="t('privacy.ippureGateTitle')">
       {{ t("privacy.ippureGateBody") }}
     </n-alert>
+    <n-alert type="warning" :title="t('privacy.hardenedPathTitle')">
+      {{ t("privacy.hardenedPathBody") }}
+    </n-alert>
 
     <n-space>
       <n-button type="primary" :loading="runningAll" @click="runAllChecks">
@@ -61,6 +64,9 @@
             <n-alert :type="riskAlertType(ipExposure.leakRisk)" :title="ipExposureTitle">
               {{ ipExposureSummary }}
             </n-alert>
+            <n-alert type="info" :title="t('privacy.ipProtectionTitle')">
+              {{ t("privacy.ipProtectionBody") }}
+            </n-alert>
             <n-descriptions bordered :column="1" size="small">
               <n-descriptions-item :label="t('privacy.browserEgress')">
                 {{ ipExposure.browserIp || "-" }}
@@ -89,6 +95,9 @@
           <n-space vertical :size="10">
             <n-alert :type="riskAlertType(dnsResult.leakRisk)" :title="dnsAlertTitle">
               {{ dnsSummary }}
+            </n-alert>
+            <n-alert type="info" :title="t('privacy.dnsProtectionTitle')">
+              {{ t("privacy.dnsProtectionBody") }}
             </n-alert>
             <n-list bordered>
               <n-list-item v-for="note in dnsResult.notes" :key="note">
@@ -127,6 +136,9 @@
             <n-alert :type="riskAlertType(webrtcResult.leakRisk)" :title="webrtcAlertTitle">
               {{ webrtcSummary }}
             </n-alert>
+            <n-alert type="info" :title="t('privacy.webrtcProtectionTitle')">
+              {{ t("privacy.webrtcProtectionBody") }}
+            </n-alert>
             <n-list v-if="webrtcResult.candidates.length" bordered>
               <n-list-item v-for="candidate in webrtcResult.candidates" :key="candidate.candidate">
                 {{ candidateTypeLabel(candidate.type) }} ·
@@ -154,6 +166,9 @@
             </n-button>
             <n-alert :type="riskAlertType(fingerprintRisk.leakRisk)" :title="fingerprintAlertTitle">
               {{ fingerprintSummary }}
+            </n-alert>
+            <n-alert type="info" :title="t('privacy.fingerprintProtectionTitle')">
+              {{ t("privacy.fingerprintProtectionBody") }}
             </n-alert>
             <n-descriptions v-if="fingerprintSnapshot" bordered :column="1" size="small">
               <n-descriptions-item :label="t('privacy.fingerprintTimezone')">
@@ -189,17 +204,32 @@
               {{ cleanlinessSummaryText }}
             </n-alert>
             <n-descriptions bordered :column="1" size="small">
+              <n-descriptions-item :label="t('nodePool.status.active')">
+                {{ activeNodes.length }}
+              </n-descriptions-item>
+              <n-descriptions-item :label="t('privacy.localIntelligenceChecked')">
+                {{ activeIntelligenceCheckedCount }}
+              </n-descriptions-item>
               <n-descriptions-item :label="t('nodePool.cleanliness.trusted')">
                 {{ intelligenceSummary.trustedCount }}
               </n-descriptions-item>
               <n-descriptions-item :label="t('nodePool.cleanliness.suspicious')">
                 {{ intelligenceSummary.suspiciousCount }}
               </n-descriptions-item>
+              <n-descriptions-item :label="t('nodePool.cleanliness.unknown')">
+                {{ intelligenceSummary.unknownCleanCount }}
+              </n-descriptions-item>
               <n-descriptions-item :label="t('nodePool.networkType.residential_likely')">
                 {{ intelligenceSummary.residentialCount }}
               </n-descriptions-item>
+              <n-descriptions-item :label="t('nodePool.networkType.isp_likely')">
+                {{ intelligenceSummary.ispLikeCount }}
+              </n-descriptions-item>
               <n-descriptions-item :label="t('nodePool.networkType.datacenter_likely')">
                 {{ intelligenceSummary.datacenterCount }}
+              </n-descriptions-item>
+              <n-descriptions-item :label="t('nodePool.networkType.unknown')">
+                {{ intelligenceSummary.unknownNetworkCount }}
               </n-descriptions-item>
             </n-descriptions>
           </n-space>
@@ -441,6 +471,9 @@ const runtimeDnsRisk = computed(() => classifyRuntimeDnsRisk(context.value));
 const ipExposure = computed(() => classifyIpExposure(browserPublicIp.value, context.value));
 const fingerprintRisk = computed(() => classifyFingerprintRisk(fingerprintSnapshot.value));
 const intelligenceSummary = computed(() => summarizeNodeIntelligence(activeNodes.value));
+const activeIntelligenceCheckedCount = computed(
+  () => activeNodes.value.filter((node) => !!node.intelligenceCheckedAt).length,
+);
 
 const dnsResult = computed<PrivacyDnsResult>(() => ({
   leakRisk: runtimeDnsRisk.value.leakRisk,
@@ -580,10 +613,15 @@ const cleanlinessAlertTitle = computed(() =>
 const cleanlinessSummaryText = computed(() => {
   if (!activeNodes.value.length) return t("privacy.cleanlinessNoActiveNodes");
   return t("privacy.cleanlinessSummary", {
+    active: activeNodes.value.length,
+    checked: activeIntelligenceCheckedCount.value,
     trusted: intelligenceSummary.value.trustedCount,
     suspicious: intelligenceSummary.value.suspiciousCount,
+    unknownClean: intelligenceSummary.value.unknownCleanCount,
     residential: intelligenceSummary.value.residentialCount,
+    isp: intelligenceSummary.value.ispLikeCount,
     datacenter: intelligenceSummary.value.datacenterCount,
+    unknownNetwork: intelligenceSummary.value.unknownNetworkCount,
   });
 });
 

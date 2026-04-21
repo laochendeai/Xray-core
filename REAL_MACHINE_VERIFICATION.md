@@ -94,6 +94,38 @@ How to read the IP fields reported by `baseline-summary.txt` and `baseline-summa
 
 The fallback rehearsal remains a separate, extended verification and is not part of this minimum baseline.
 
+## IPPure Privacy Verification
+
+Use this when validating the privacy diagnostics and external IPPure result on the real machine. Do not use a normal daily browser as the acceptance path: transparent TUN stable mode captures TCP plus UDP/53 and UDP/443, but unmanaged WebRTC/STUN and browser fingerprint surfaces are browser-policy concerns.
+
+1. Rebuild and restart the local runtime from this repo:
+   ```bash
+   make build
+   ./xray run -c /path/to/config.json
+   ```
+2. Confirm the local SOCKS inbound is reachable. The default development config uses `127.0.0.1:11080`.
+3. Run the hardened IPPure capture:
+   ```bash
+   IPPURE_OUTPUT_DIR=runtime/ippure-verification node scripts/verify-ippure.mjs
+   ```
+4. If visual confirmation is needed, run the same controlled browser non-headless:
+   ```bash
+   IPPURE_HEADLESS=0 IPPURE_OUTPUT_DIR=runtime/ippure-visible node scripts/verify-ippure.mjs
+   ```
+
+The script automatically prefers a localhost SOCKS inbound when `IPPURE_PROXY_SERVER` is not set. It checks `IPPURE_CONFIG`, then `dev-config.current-nodes.json` in the current repo, then the config path from a currently running `xray run -c ...` process. Override it explicitly for single-node validation:
+
+```bash
+IPPURE_PROXY_SERVER=socks5://127.0.0.1:11080 node scripts/verify-ippure.mjs
+```
+
+Pass conditions for issue-style verification:
+
+- `summary.json` records a non-empty `proxyServer` and a `proxySource` such as `env`, `cwd-config:*`, or `running-process:*`.
+- IPPure WebRTC evidence does not expose the machine's direct public IP.
+- DNS evidence does not show local/private ISP resolver leakage on the unmanaged host path.
+- Any remaining IPPure purity score limitation is attributed to the selected node exit and belongs in the clean-node follow-up, not in the WebRTC/DNS leak closure.
+
 ## Verification Scripts
 
 ### 1. Read-Only Preflight
